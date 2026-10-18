@@ -1,0 +1,2321 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="background-elements">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+    </div>
+
+    <div class="toast-container" id="toastContainer"></div>
+
+    <main class="container">
+        <header class="header">
+            <div class="header-top-bar">
+                <div class="header-left-tools">
+                    <button id="systemStatusBtn" class="status-pill" title="Mantenimiento y Actualizaciones del Motor">
+                        <span class="status-dot" id="statusDot"></span>
+                        <span id="systemVersionText">yt-dlp comprobando...</span>
+                        <span id="updateAlertBadge" class="update-badge hidden">¡Actualización disponible!</span>
+                    </button>
+
+                    <div class="cookie-session-pill" title="Sesión Anti-Bloqueo: Usa cookies del navegador para evitar errores de 'Sign in to confirm you are not a bot' y descargar videos con restricción de edad (+18)">
+                        <span class="cookie-icon">🔑</span>
+                        <span class="cookie-text">Cookies:</span>
+                        <select id="browserCookiesSelect" class="cookie-select" aria-label="Seleccionar navegador para cookies">
+                            <option value="">Ninguna</option>
+                            <option value="chrome">Chrome</option>
+                            <option value="edge">Edge</option>
+                            <option value="brave">Brave</option>
+                            <option value="firefox">Firefox</option>
+                            <option value="opera">Opera</option>
+                            <option value="vivaldi">Vivaldi</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button id="shutdownBtn" class="btn-shutdown" title="Apagar servidor">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                        <line x1="12" y1="2" x2="12" y2="12"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <h1>Descargador <span class="gradient-text">Multimedia Pro</span></h1>
+            <p class="subtitle">Música y Videos en alta calidad &bull; YouTube, TikTok, Reels, X y más &bull; Auto-reparación &bull; Portable</p>
+        </header>
+
+        <!-- ═══════ DIAGNOSTIC CARD (Shown on YouTube/Google errors) ═══════ -->
+        <div id="diagnosticCard" class="card diagnostic-card hidden slide-in">
+            <div class="diag-header">
+                <div class="diag-icon-wrapper">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                </div>
+                <div class="diag-info">
+                    <h3 id="diagTitle" class="diag-title">Problema de conexión con YouTube detectado</h3>
+                    <p id="diagMessage" class="diag-message"></p>
+                    <p id="diagSuggestion" class="diag-suggestion"></p>
+                </div>
+            </div>
+            <div class="diag-actions">
+                <button id="diagFixBtn" class="btn btn-gradient btn-sm">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="16 16 12 12 8 16"></polyline>
+                        <line x1="12" y1="12" x2="12" y2="21"></line>
+                        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                        <polyline points="16 16 12 12 8 16"></polyline>
+                    </svg>
+                    Actualizar yt-dlp y Reparar (1 Clic)
+                </button>
+                <button type="button" id="diagReportBugBtn" class="btn btn-outline btn-sm btn-report-bug">🐞 Reportar este fallo a Alex</button>
+                <button id="diagDismissBtn" class="btn btn-outline btn-sm">Ocultar</button>
+            </div>
+        </div>
+
+        <!-- ═══════ TABS ═══════ -->
+        <div class="tabs">
+            <button class="tab active" data-tab="music">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 18V5l12-2v13"></path>
+                    <circle cx="6" cy="18" r="3"></circle>
+                    <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                Musica
+            </button>
+            <button class="tab" data-tab="video">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                </svg>
+                Videos
+            </button>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <!-- ═══════ MUSIC TAB ═══════ -->
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content" id="musicTab">
+            <section class="card main-card">
+                <div class="input-group">
+                    <input type="text" id="urlInput" placeholder="Pega el enlace de YouTube Music, YouTube, SoundCloud..." autocomplete="off">
+                    <button id="fetchBtn" class="btn btn-primary">
+                        <span class="btn-text">Obtener Info</span>
+                        <div class="spinner hidden" id="fetchSpinner"></div>
+                    </button>
+                </div>
+            </section>
+
+            <section id="skeletonPanel" class="card metadata-card hidden">
+                <div class="metadata-content skeleton-loader">
+                    <div class="skeleton-thumbnail"></div>
+                    <div class="skeleton-details">
+                        <div class="skeleton-line title-line"></div>
+                        <div class="skeleton-line"></div>
+                        <div class="skeleton-line"></div>
+                        <div class="skeleton-line short"></div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="metadataPanel" class="card metadata-card hidden slide-in">
+                <div class="metadata-content">
+                    <div class="thumbnail-wrapper">
+                        <img id="thumbPreview" src="" alt="Portada del album">
+                        <div class="duration-badge" id="durationDisplay">00:00</div>
+                    </div>
+                    
+                    <form id="metadataForm" class="metadata-form">
+                        <div class="form-group full-width">
+                            <label for="titleInput">Titulo de la cancion</label>
+                            <input type="text" id="titleInput" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="artistInput">Artista</label>
+                            <input type="text" id="artistInput" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="albumInput">Album</label>
+                            <input type="text" id="albumInput">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="yearInput">Ano</label>
+                            <input type="text" id="yearInput">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="genreInput">Genero</label>
+                            <input type="text" id="genreInput">
+                        </div>
+                    </form>
+                </div>
+
+                <div class="music-options-box">
+                    <label class="feature-toggle-label" title="Elimina intros habladas, diálogos de videoclips o silencios antes de convertir a MP3">
+                        <input type="checkbox" id="musicSponsorBlockCheckbox" checked>
+                        <span class="toggle-switch-visual"></span>
+                        <span class="toggle-text-wrap">
+                            <strong>🎵 Omitir intros habladas y silencios de videoclips (SponsorBlock)</strong>
+                            <small>Recorta secciones no musicales y diálogos de videoclips para obtener música limpia.</small>
+                        </span>
+                    </label>
+                </div>
+                
+                    <div id="musicFilesizeBadge" class="music-filesize-chip hidden">
+                        <span class="chip-icon">📦</span>
+                        <span>Peso estimado: <strong id="musicFilesizeVal">~4.5 MB</strong> <small>(MP3 a 160 kbps)</small></span>
+                    </div>
+
+                    <div class="actions">
+                        <div id="downloadProgress" class="progress-bar-container hidden">
+                            <div class="progress-bar pulsing"></div>
+                            <span class="progress-text">Descargando y procesando audio...</span>
+                        </div>
+                        <div class="btn-action-group">
+                            <button id="downloadBtn" class="btn btn-download-primary full-width">
+                                <span class="btn-download-icon">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                        <polyline points="7 10 12 15 17 10"></polyline>
+                                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                                    </svg>
+                                </span>
+                                <span class="btn-text">Descargar Canción (MP3)</span>
+                            </button>
+                            <button type="button" class="btn-open-folder full-width" onclick="openFolder('canciones')" title="Abrir carpeta de música en el Explorador de Windows">
+                                <span class="folder-emoji">📁</span>
+                                <span>Abrir Carpeta: <strong>Canciones (Música)</strong></span>
+                                <span class="folder-arrow">↗</span>
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="history-section">
+                    <div class="history-header">
+                        <h2 class="section-title">Historial de Descargas</h2>
+                        <button type="button" class="btn-open-folder btn-open-folder-sm" onclick="openFolder('canciones')" title="Abrir carpeta de canciones">
+                            <span class="folder-emoji">📁</span>
+                            <span>Ver Carpeta de Música</span>
+                            <span class="folder-arrow">↗</span>
+                        </button>
+                    </div>
+                <div id="historyList" class="history-list">
+                    <div class="empty-state" id="emptyHistory">
+                        No hay descargas recientes en esta sesion.
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <!-- ═══════ VIDEO TAB ═══════ -->
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content hidden" id="videoTab">
+
+            <!-- URL Input -->
+            <section class="card main-card">
+                <div class="input-group">
+                    <input type="text" id="videoUrlInput" placeholder="Pega el enlace de YouTube, TikTok (sin marcas), Reels, X, Twitch..." autocomplete="off">
+                    <button id="videoFetchBtn" class="btn btn-primary">
+                        <span class="btn-text">Obtener Info</span>
+                        <div class="spinner hidden" id="videoFetchSpinner"></div>
+                    </button>
+                </div>
+                <div class="platform-badges-row">
+                    <span class="platform-badge"><span class="badge-dot"></span>YouTube</span>
+                    <span class="platform-badge"><span class="badge-dot"></span>TikTok (Sin marca de agua)</span>
+                    <span class="platform-badge"><span class="badge-dot"></span>Instagram Reels</span>
+                    <span class="platform-badge"><span class="badge-dot"></span>X / Twitter</span>
+                    <span class="platform-badge"><span class="badge-dot"></span>Twitch & Facebook</span>
+                </div>
+            </section>
+
+            <!-- Skeleton Loader -->
+            <section id="videoSkeletonPanel" class="card hidden">
+                <div class="video-skeleton">
+                    <div class="skeleton-video-thumb skeleton-pulse"></div>
+                    <div class="skeleton-video-details">
+                        <div class="skeleton-line title-line skeleton-pulse"></div>
+                        <div class="skeleton-line skeleton-pulse"></div>
+                        <div class="skeleton-line short skeleton-pulse"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Video Info Panel -->
+            <section id="videoInfoPanel" class="video-info-sections-wrap hidden slide-in">
+                <!-- Section 1: Media Preview & Thumbnail Card -->
+                <div class="panel-section-card card-section-media">
+                    <div class="section-card-header">
+                        <div class="section-card-title">
+                            <span class="section-badge-num section-badge-pink">1</span>
+                            <h4>Información y Miniatura</h4>
+                        </div>
+                    </div>
+                    <div class="video-info-header">
+                        <div class="video-thumb-container">
+                            <img id="videoThumbPreview" src="" alt="Miniatura del video">
+                            <div class="duration-badge" id="videoDuration">00:00</div>
+                        </div>
+                        <div class="video-details">
+                            <h3 id="videoTitle" class="video-title"></h3>
+                            <p id="videoChannel" class="video-channel"></p>
+                            <div class="video-meta-row">
+                                <span id="videoViews" class="video-meta-item"></span>
+                                <span class="meta-dot"></span>
+                                <span id="videoDate" class="video-meta-item"></span>
+                                <span class="meta-dot"></span>
+                                <span id="videoMetaFilesize" class="video-meta-item meta-filesize" title="Peso estimado para la mejor calidad seleccionada">📦 ~145 MB</span>
+                            </div>
+                            <div class="video-quick-actions">
+                                <button id="descToggleBtn" class="btn btn-outline btn-sm">
+                                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    </svg>
+                                    Ver Descripción
+                                </button>
+                                <button id="thumbDownloadBtn" class="btn btn-download-secondary btn-sm" title="Descargar miniatura en alta calidad">
+                                    <span class="btn-download-icon-sm">
+                                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                    </span>
+                                    <span class="btn-text">Descargar Miniatura</span>
+                                </button>
+                                <button type="button" class="btn-open-folder btn-open-folder-sm" onclick="openFolder('miniaturas')" title="Abrir carpeta donde se guardan las miniaturas en el Explorador de Windows">
+                                    <span class="folder-emoji">📁</span>
+                                    <span>Abrir Carpeta: <strong>Miniaturas</strong></span>
+                                    <span class="folder-arrow">↗</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Description (collapsible) -->
+                    <div id="descriptionPanel" class="description-panel hidden">
+                        <div class="description-scroll">
+                            <pre id="descriptionText" class="description-text"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 2: Format & Download Options Card -->
+                <div class="panel-section-card card-section-options">
+                    <div class="section-card-header">
+                        <div class="section-card-title">
+                            <span class="section-badge-num section-badge-violet">2</span>
+                            <h4>Calidad, Formato y Peso Estimado</h4>
+                        </div>
+                    </div>
+
+                    <!-- Prominent Filesize Highlight Card -->
+                    <div class="filesize-highlight-card">
+                        <div class="filesize-badge-icon">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <line x1="16.5" y1="9.4" x2="7.5" y2="4.21"></line>
+                                <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                            </svg>
+                        </div>
+                        <div class="filesize-badge-info">
+                            <span class="filesize-badge-label">PESO ESTIMADO DE DESCARGA:</span>
+                            <div class="filesize-badge-row">
+                                <strong id="videoSelectedSizeDisplay" class="filesize-badge-value">~145.2 MB</strong>
+                                <span id="videoSelectedSizeHint" class="filesize-badge-desc">(1080p Full HD • Video + Audio)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="options-row">
+                        <div class="option-group">
+                            <label for="qualitySelect">Resolución / Calidad</label>
+                            <select id="qualitySelect" class="select-styled"></select>
+                        </div>
+                        <div class="option-group">
+                            <label for="downloadTypeSelect">Tipo de Descarga</label>
+                            <select id="downloadTypeSelect" class="select-styled">
+                                <option value="video_audio">Video + Audio (MP4)</option>
+                                <option value="video_only">Solo Video (sin audio)</option>
+                                <option value="audio_only">Solo Audio (MP3 a 192 kbps)</option>
+                            </select>
+                        </div>
+                        <div class="option-group hidden" id="audioLanguageGroup">
+                            <label for="audioLanguageSelect">
+                                Idioma de Audio / Doblaje
+                                <span class="badge-mini">Multi-audio</span>
+                            </label>
+                            <select id="audioLanguageSelect" class="select-styled"></select>
+                        </div>
+                    </div>
+                    <div id="downloadTypeHint" class="type-hint hidden"></div>
+
+                    <!-- Advanced Video Modifiers -->
+                    <div class="video-features-stack">
+                        <!-- Editor Compatible Mode -->
+                        <div class="feature-toggle-card">
+                            <label class="feature-toggle-label" title="Fuerza códec H.264 (AVC) y audio AAC para garantizar importación fluida sin lag ni pantallas negras en Premiere Pro, DaVinci Resolve o CapCut.">
+                                <input type="checkbox" id="editorModeCheckbox">
+                                <span class="toggle-switch-visual"></span>
+                                <span class="toggle-text-wrap">
+                                    <strong>🎬 Modo Compatible con Editores (Forzar H.264 / AAC)</strong>
+                                    <small>Evita formatos VP9/AV1 problemáticos en programas de edición de vídeo.</small>
+                                </span>
+                            </label>
+                            <span class="feature-pill-tag">Para NLEs</span>
+                        </div>
+
+                        <!-- SponsorBlock Video -->
+                        <div class="feature-toggle-card">
+                            <label class="feature-toggle-label" title="Omite segmentos patrocinados, intros y cierres molestos detectados por SponsorBlock.">
+                                <input type="checkbox" id="videoSponsorBlockCheckbox">
+                                <span class="toggle-switch-visual"></span>
+                                <span class="toggle-text-wrap">
+                                    <strong>⏭️ Saltar segmentos patrocinados e intros (SponsorBlock)</strong>
+                                    <small>Descarga un video limpio recortando intros y promociones.</small>
+                                </span>
+                            </label>
+                        </div>
+
+                        <!-- Split Chapters -->
+                        <div class="feature-toggle-card hidden" id="splitChaptersCard">
+                            <label class="feature-toggle-label" title="Divide automáticamente el vídeo en archivos individuales según sus capítulos y los guarda en una carpeta.">
+                                <input type="checkbox" id="splitChaptersCheckbox">
+                                <span class="toggle-switch-visual"></span>
+                                <span class="toggle-text-wrap">
+                                    <strong id="splitChaptersTitle">📑 Dividir en archivos separados por capítulos</strong>
+                                    <small>Guarda cada capítulo como un archivo MP4 individual y ordenado dentro de una subcarpeta.</small>
+                                </span>
+                            </label>
+                            <span class="feature-pill-tag" id="chaptersCountTag">0 capítulos</span>
+                        </div>
+
+                        <!-- Clip Trimmer -->
+                        <div class="clip-trimmer-card">
+                            <div class="clip-trimmer-header">
+                                <label class="feature-toggle-label">
+                                    <input type="checkbox" id="clipTrimToggle">
+                                    <span class="toggle-switch-visual"></span>
+                                    <span class="toggle-text-wrap">
+                                        <strong>✂️ Recortar fragmento (Clip)</strong>
+                                        <small>Descarga únicamente un fragmento del video especificando el inicio y el fin.</small>
+                                    </span>
+                                </label>
+                            </div>
+                            <div class="clip-inputs-grid hidden" id="clipInputsGrid">
+                                <div class="clip-field">
+                                    <label for="clipStartTime">Inicio (hh:mm:ss o mm:ss):</label>
+                                    <input type="text" id="clipStartTime" class="clip-text-input" placeholder="01:15" autocomplete="off">
+                                    <span class="field-hint">Ej: 01:15 o 00:01:15</span>
+                                </div>
+                                <div class="clip-field">
+                                    <label for="clipEndTime">Fin (hh:mm:ss o mm:ss):</label>
+                                    <input type="text" id="clipEndTime" class="clip-text-input" placeholder="02:30" autocomplete="off">
+                                    <span class="field-hint">Ej: 02:30 o 00:02:30</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Section 3: Subtitles / Transcription Section -->
+                <div class="panel-section-card card-section-subtitles">
+                    <div class="section-card-header">
+                        <div class="section-card-title">
+                            <span class="section-badge-num section-badge-cyan">3</span>
+                            <h4>Subtítulos y Transcripción (Descarga en Texto)</h4>
+                        </div>
+                        <span id="subCountBadge" class="sub-counter-badge">0 disponibles</span>
+                    </div>
+
+                    <!-- Search & Quick Filter bar for Subtitles -->
+                    <div class="sub-filter-bar">
+                        <div class="search-input-wrapper">
+                            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="subSearchInput" class="sub-search-box" placeholder="Filtrar subtítulo (ej: español, english, auto)..." autocomplete="off">
+                            <button type="button" id="subSearchClear" class="clear-btn hidden" title="Limpiar">&times;</button>
+                        </div>
+                        <div class="sub-chips">
+                            <button type="button" class="sub-chip active" data-filter="all">Todos</button>
+                            <button type="button" class="sub-chip" data-filter="es">Español</button>
+                            <button type="button" class="sub-chip" data-filter="en">Inglés</button>
+                            <button type="button" class="sub-chip" data-filter="creator">Solo Creador</button>
+                            <button type="button" class="sub-chip" data-filter="auto">Solo Auto</button>
+                        </div>
+                    </div>
+
+                    <div class="subtitle-controls">
+                        <select id="subtitleSelect" class="select-styled flex-grow">
+                            <option value="">-- Sin subtítulos disponibles --</option>
+                        </select>
+                        <button id="subtitleDownloadBtn" class="btn btn-download-secondary btn-sm" disabled title="Descargar transcripción en formato texto (.txt/.srt)">
+                            <span class="btn-download-icon-sm">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                    <polyline points="7 10 12 15 17 10"></polyline>
+                                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                            </span>
+                            <span class="btn-text">Descargar Texto</span>
+                        </button>
+                        <button type="button" class="btn-open-folder btn-open-folder-sm" onclick="openFolder('subtitulos')" title="Abrir carpeta donde se guardan los subtítulos en el Explorador de Windows">
+                            <span class="folder-emoji">📁</span>
+                            <span>Abrir Carpeta: <strong>Subtítulos</strong></span>
+                            <span class="folder-arrow">↗</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Section 4: Main Download Action & Folder Shortcuts -->
+                <div class="panel-section-card card-section-actions">
+                    <div class="section-card-header">
+                        <div class="section-card-title">
+                            <span class="section-badge-num section-badge-emerald">4</span>
+                            <h4>Descarga y Accesos Rápidos</h4>
+                        </div>
+                    </div>
+                    <button id="videoDownloadBtn" class="btn btn-download-primary full-width">
+                        <span class="btn-download-icon">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </span>
+                        <span class="btn-text">Descargar Video</span>
+                    </button>
+                    <div class="video-folder-shortcut-row">
+                        <button type="button" class="btn-open-folder" id="openVideoFolderBtn" onclick="openFolder(getActiveVideoDestination())" title="Abrir carpeta donde se guardará este archivo">
+                            <span class="folder-emoji">📁</span>
+                            <span id="activeVideoFolderLabel">Abrir Carpeta: <strong>Videos</strong></span>
+                            <span class="folder-arrow">↗</span>
+                        </button>
+                        <button type="button" class="btn-open-folder" onclick="openFolder('miniaturas')" title="Abrir carpeta donde se guarda la miniatura">
+                            <span class="folder-emoji">📁</span>
+                            <span>Abrir Carpeta: <strong>Miniaturas</strong></span>
+                            <span class="folder-arrow">↗</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div id="videoProgressSection" class="video-progress-section hidden">
+                    <div class="progress-info-row">
+                        <span id="vpLabel" class="progress-label">Descargando...</span>
+                        <span id="vpPercent" class="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div id="vpFill" class="progress-fill"></div>
+                    </div>
+                    <div class="progress-meta-row">
+                        <span id="vpSpeed"></span>
+                        <span id="vpEta"></span>
+                    </div>
+                </div>
+
+                <!-- Console (collapsible) -->
+                <div class="console-section">
+                    <button id="consoleToggle" class="collapsible-toggle">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="4 17 10 11 4 5"></polyline>
+                            <line x1="12" y1="19" x2="20" y2="19"></line>
+                        </svg>
+                        <span>Consola</span>
+                        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </button>
+                    <div id="consolePanel" class="console-panel hidden">
+                        <div id="consoleOutput" class="console-output"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Video Download History -->
+            <section class="history-section">
+                <div class="history-header">
+                    <h2 class="section-title">Historial de Descargas</h2>
+                    <button type="button" class="btn-open-folder btn-open-folder-sm" onclick="openFolder('videos')" title="Abrir carpeta de videos">
+                        <span class="folder-emoji">📁</span>
+                        <span>Ver Carpeta de Videos</span>
+                        <span class="folder-arrow">↗</span>
+                    </button>
+                </div>
+                <div id="videoHistoryList" class="history-list">
+                    <div class="empty-state" id="emptyVideoHistory">
+                        No hay descargas recientes en esta sesion.
+                    </div>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <!-- ═══════ MAINTENANCE & UPDATE MODAL ═══════ -->
+    <div id="systemModal" class="modal-overlay hidden">
+        <div class="modal-content card">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accent-icon">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    <h2>Mantenimiento y Actualizaciones</h2>
+                </div>
+                <button id="modalCloseBtn" class="modal-close" title="Cerrar">&times;</button>
+            </div>
+
+            <p class="modal-subtitle">
+                Google y YouTube modifican sus mecanismos de protección con frecuencia. Mantener el motor actualizado garantiza que las descargas sigan funcionando sin errores 403.
+            </p>
+
+            <!-- Versions Status Grid -->
+            <div class="version-grid">
+                <div class="version-card">
+                    <span class="v-label">Instalación PC</span>
+                    <strong id="modalPcVersion" class="v-val">-</strong>
+                    <span class="v-sub">Entorno principal</span>
+                </div>
+                <div class="version-card">
+                    <span class="v-label">Versión Portable</span>
+                    <strong id="modalPortableVersion" class="v-val">-</strong>
+                    <span id="modalPortableSub" class="v-sub">Carpeta portable</span>
+                </div>
+                <div class="version-card highlight">
+                    <span class="v-label">Última en PyPI</span>
+                    <strong id="modalLatestVersion" class="v-val">-</strong>
+                    <span id="modalUpdateBadge" class="v-sub">Comprobando...</span>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="modal-action-buttons">
+                <button id="runUpdateBtn" class="btn btn-gradient full-width">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="16 16 12 12 8 16"></polyline>
+                        <line x1="12" y1="12" x2="12" y2="21"></line>
+                        <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"></path>
+                        <polyline points="16 16 12 12 8 16"></polyline>
+                    </svg>
+                    <span class="btn-text">Actualizar yt-dlp y Librerías (1 Clic)</span>
+                </button>
+                <button id="clearCacheBtn" class="btn btn-outline">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"></path>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                    </svg>
+                    Limpiar Caché
+                </button>
+            </div>
+
+            <!-- Live Update Console -->
+            <div class="update-console-wrap">
+                <div class="update-console-header">
+                    <span>Consola de actualización en vivo</span>
+                    <span id="updateStatusText" class="update-status-indicator">Listo</span>
+                </div>
+                <div id="updateConsoleOutput" class="console-output modal-terminal"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════ PRE-DOWNLOAD CONFIRMATION & SUBTITLE EMBED MODAL ═══════ -->
+    <div id="downloadConfirmModal" class="modal-overlay hidden">
+        <div class="modal-content card download-modal-box">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accent-icon">
+                        <polygon points="23 7 16 12 23 17 23 7"></polygon>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
+                    <h2>Confirmar y Personalizar Descarga</h2>
+                </div>
+                <button type="button" id="dlModalCloseBtn" class="modal-close" title="Cerrar">&times;</button>
+            </div>
+
+            <p class="modal-subtitle">
+                Personaliza la pista de audio (si tiene doblajes) y elige qué subtítulos incrustar para activarlos y cambiarlos en tu reproductor de video (Windows Media Player, Películas y TV, VLC).
+            </p>
+
+            <!-- Video summary card -->
+            <div class="modal-video-summary">
+                <img id="modalVideoThumb" src="" alt="Miniatura" class="modal-thumb">
+                <div class="modal-video-meta">
+                    <h4 id="modalVideoTitle" class="modal-vtitle"></h4>
+                    <div class="modal-tags">
+                        <span id="modalQualityTag" class="summary-tag tag-quality">1080p</span>
+                        <span id="modalFilesizeTag" class="summary-tag tag-filesize">📦 ~145.2 MB</span>
+                        <span id="modalTypeTag" class="summary-tag tag-type">Video + Audio</span>
+                        <span id="modalAudioTag" class="summary-tag tag-audio hidden">Español</span>
+                        <span id="modalEditorTag" class="summary-tag tag-editor hidden">🎬 H.264 / AAC</span>
+                        <span id="modalClipTag" class="summary-tag tag-clip hidden">✂️ Clip</span>
+                        <span id="modalSponsorTag" class="summary-tag tag-sponsor hidden">⏭️ SponsorBlock</span>
+                        <span id="modalChaptersTag" class="summary-tag tag-chapters hidden">📑 Capítulos</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Multi-audio selector inside modal -->
+            <div id="modalAudioSection" class="modal-section hidden">
+                <label class="modal-section-title">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                    Idioma de Audio / Doblaje:
+                </label>
+                <select id="modalAudioSelect" class="select-styled"></select>
+            </div>
+
+            <!-- Subtitle embedding section -->
+            <div id="modalSubtitleSection" class="modal-section">
+                <div class="embed-subs-toggle-wrap">
+                    <label class="toggle-checkbox-label">
+                        <input type="checkbox" id="embedSubsCheckbox" checked>
+                        <span class="checkbox-custom"></span>
+                        <span class="toggle-text">
+                            <strong>Incrustar subtítulos en el reproductor (Soft Subtitles)</strong>
+                            <small>Se integrarán dentro del archivo MP4. Podrás activarlos, cambiarlos o apagarlos desde el menú de subtítulos (CC) del reproductor de Windows o VLC.</small>
+                        </span>
+                    </label>
+                </div>
+
+                <div id="modalSubsPanel" class="modal-subs-panel">
+                    <!-- Subtitle Search in Modal -->
+                    <div class="sub-filter-bar">
+                        <div class="search-input-wrapper">
+                            <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="11" cy="11" r="8"></circle>
+                                <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                            </svg>
+                            <input type="text" id="modalSubSearch" class="sub-search-box" placeholder="Buscar subtítulo (ej: español, english)..." autocomplete="off">
+                            <button type="button" id="modalSubClear" class="clear-btn hidden" title="Limpiar">&times;</button>
+                        </div>
+                        <div class="sub-chips">
+                            <button type="button" class="sub-chip active" data-modelfilter="all">Todos</button>
+                            <button type="button" class="sub-chip" data-modelfilter="es">Español</button>
+                            <button type="button" class="sub-chip" data-modelfilter="en">Inglés</button>
+                            <button type="button" class="sub-chip" data-modelfilter="creator">Creador</button>
+                            <button type="button" class="sub-chip" data-modelfilter="auto">Auto</button>
+                        </div>
+                    </div>
+
+                    <!-- Subtitles quick select actions -->
+                    <div class="sub-quick-actions">
+                        <button type="button" id="btnSelectEs" class="btn-link-action">Seleccionar Español</button>
+                        <button type="button" id="btnSelectEn" class="btn-link-action">Seleccionar Inglés</button>
+                        <button type="button" id="btnSelectCreator" class="btn-link-action">Todos del Creador</button>
+                        <button type="button" id="btnClearSubs" class="btn-link-action">Deseleccionar</button>
+                        <span id="selectedSubsCount" class="selected-count">0 seleccionados</span>
+                    </div>
+
+                    <!-- Scrollable Subtitles List with Badges & Collapsible Secondary Languages -->
+                    <div id="modalSubtitlesList" class="modal-subtitles-list">
+                        <div id="modalSubsPrimaryList" class="subs-sublist">
+                            <!-- Populated dynamically: Spanish, English, and Creator -->
+                        </div>
+                        <div id="moreSubsWrapper" class="more-subs-wrapper hidden">
+                            <button type="button" id="btnToggleMoreSubs" class="btn-toggle-more-subs">
+                                <span class="more-subs-icon">▾</span>
+                                <span id="btnToggleMoreSubsText">Ver más idiomas (+0 de autotraducción)</span>
+                            </button>
+                            <div id="moreSubsCollapse" class="more-subs-collapse hidden">
+                                <div id="modalSubsSecondaryList" class="subs-sublist">
+                                    <!-- Populated dynamically: All other auto languages -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="noSubsMessage" class="no-subs-message hidden">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="8" x2="12" y2="12"></line>
+                        <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                    </svg>
+                    <span>Este video no tiene subtítulos disponibles en YouTube.</span>
+                </div>
+            </div>
+
+            <!-- Footer Buttons -->
+            <div class="modal-footer-actions">
+                <button type="button" class="btn-open-folder btn-open-folder-sm" onclick="openFolder(getActiveVideoDestination())" title="Abrir carpeta donde se guardará este archivo">
+                    <span class="folder-emoji">📁</span>
+                    <span>Abrir Carpeta de Destino</span>
+                    <span class="folder-arrow">↗</span>
+                </button>
+                <div class="modal-footer-right">
+                    <button type="button" id="modalCancelBtn" class="btn btn-outline">Cancelar</button>
+                    <button type="button" id="modalConfirmBtn" class="btn btn-download-primary">
+                        <span class="btn-download-icon">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </span>
+                        <span class="btn-text">Iniciar Descarga</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- ═══════ JAVASCRIPT ═══════ -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <script>
+    (() => {
+        'use strict';
+
+        // ─── Tab Switching ─────────────────────────────────────────────────────
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+                document.getElementById(tab.dataset.tab + 'Tab').classList.remove('hidden');
+            });
+        });
+
+        // ─── Utilities ─────────────────────────────────────────────────────────
+        function formatDuration(seconds) {
+            if (!seconds) return '00:00';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            if (h > 0) return `${h}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+            return `${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
+        }
+
+        function formatNumber(n) {
+            if (!n) return '0';
+            if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
+            if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+            if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+            return n.toString();
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.innerHTML = `
+                <div class="toast-icon"></div>
+                <div class="toast-content">${message}</div>
+            `;
+            container.appendChild(toast);
+            void toast.offsetWidth;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        }
+
+        // ─── Browser Cookies Anti-Block Helper ─────────────────────────────────
+        function getSelectedCookieBrowser() {
+            const sel = document.getElementById('browserCookiesSelect');
+            return (sel && sel.value) ? sel.value : null;
+        }
+
+        const cookieSelect = document.getElementById('browserCookiesSelect');
+        if (cookieSelect) {
+            const saved = localStorage.getItem('yt_anti_block_browser');
+            if (saved !== null) {
+                cookieSelect.value = saved;
+            }
+            cookieSelect.addEventListener('change', () => {
+                localStorage.setItem('yt_anti_block_browser', cookieSelect.value);
+                if (cookieSelect.value) {
+                    showToast(`Sesión de cookies vinculada a: ${cookieSelect.options[cookieSelect.selectedIndex].text}`, 'success');
+                } else {
+                    showToast('Sesión de cookies desactivada (Ninguna).', 'info');
+                }
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  MUSIC TAB
+        // ═════════════════════════════════════════════════════════════════════════
+
+        const m = {
+            urlInput:        document.getElementById('urlInput'),
+            fetchBtn:        document.getElementById('fetchBtn'),
+            fetchBtnText:    document.querySelector('#fetchBtn .btn-text'),
+            fetchSpinner:    document.getElementById('fetchSpinner'),
+            skeletonPanel:   document.getElementById('skeletonPanel'),
+            metadataPanel:   document.getElementById('metadataPanel'),
+            thumbPreview:    document.getElementById('thumbPreview'),
+            durationDisplay: document.getElementById('durationDisplay'),
+            titleInput:      document.getElementById('titleInput'),
+            artistInput:     document.getElementById('artistInput'),
+            albumInput:      document.getElementById('albumInput'),
+            yearInput:       document.getElementById('yearInput'),
+            genreInput:      document.getElementById('genreInput'),
+            downloadBtn:     document.getElementById('downloadBtn'),
+            downloadBtnText: document.querySelector('#downloadBtn .btn-text'),
+            downloadProgress:document.getElementById('downloadProgress'),
+            historyList:     document.getElementById('historyList'),
+            emptyHistory:    document.getElementById('emptyHistory'),
+            filesizeBadge:   document.getElementById('musicFilesizeBadge'),
+            filesizeVal:     document.getElementById('musicFilesizeVal'),
+        };
+
+        let musicUrl = '';
+
+        m.fetchBtn.addEventListener('click', async () => {
+            const url = m.urlInput.value.trim();
+            if (!url) { showToast('Ingresa un enlace valido.', 'error'); return; }
+
+            musicUrl = url;
+            m.fetchBtn.disabled = true;
+            m.fetchBtnText.classList.add('hidden');
+            m.fetchSpinner.classList.remove('hidden');
+            m.metadataPanel.classList.add('hidden');
+            m.metadataPanel.classList.remove('slide-in');
+            m.skeletonPanel.classList.remove('hidden');
+
+            try {
+                const res = await fetch('/api/metadata', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        url,
+                        cookies_from_browser: getSelectedCookieBrowser(),
+                    }),
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    if (data.diagnostic) showDiagnostic(data.diagnostic);
+                    throw new Error(data.error);
+                }
+                hideDiagnostic();
+
+                m.thumbPreview.src        = data.thumbnail_url || '';
+                m.durationDisplay.textContent = formatDuration(data.duration);
+                m.titleInput.value        = data.title || '';
+                m.artistInput.value       = data.artist || '';
+                m.albumInput.value        = data.album || '';
+                m.yearInput.value         = data.year || '';
+                m.genreInput.value        = data.genre || '';
+
+                if (data.filesize_mb && m.filesizeBadge && m.filesizeVal) {
+                    m.filesizeVal.textContent = data.filesize_mb;
+                    m.filesizeBadge.classList.remove('hidden');
+                } else if (m.filesizeBadge) {
+                    m.filesizeBadge.classList.add('hidden');
+                }
+
+                m.skeletonPanel.classList.add('hidden');
+                m.metadataPanel.classList.remove('hidden');
+                void m.metadataPanel.offsetWidth;
+                m.metadataPanel.classList.add('slide-in');
+            } catch(err) {
+                m.skeletonPanel.classList.add('hidden');
+                showToast(err.message, 'error');
+            } finally {
+                m.fetchBtn.disabled = false;
+                m.fetchBtnText.classList.remove('hidden');
+                m.fetchSpinner.classList.add('hidden');
+            }
+        });
+
+        m.downloadBtn.addEventListener('click', async () => {
+            if (!m.titleInput.value || !m.artistInput.value) {
+                showToast('Titulo y Artista son obligatorios.', 'error');
+                return;
+            }
+
+            m.downloadBtn.classList.add('hidden');
+            m.downloadProgress.classList.remove('hidden');
+
+            const sponsorblock = document.getElementById('musicSponsorBlockCheckbox')?.checked ?? false;
+
+            try {
+                const res = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        url: musicUrl,
+                        title: m.titleInput.value,
+                        artist: m.artistInput.value,
+                        album: m.albumInput.value,
+                        year: m.yearInput.value,
+                        genre: m.genreInput.value,
+                        thumbnail_url: m.thumbPreview.src,
+                        sponsorblock,
+                        cookies_from_browser: getSelectedCookieBrowser(),
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    hideDiagnostic();
+                    showToast(`Descarga completada: ${data.filename}`, 'success');
+                    addMusicHistory(data.filename);
+                } else {
+                    if (data.diagnostic) showDiagnostic(data.diagnostic);
+                    throw new Error(data.error || 'Error al descargar.');
+                }
+            } catch(err) {
+                showToast(err.message, 'error');
+            } finally {
+                m.downloadProgress.classList.add('hidden');
+                m.downloadBtn.classList.remove('hidden');
+            }
+        });
+
+        function addMusicHistory(filename) {
+            m.emptyHistory.style.display = 'none';
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            item.innerHTML = `
+                <img src="${m.thumbPreview.src}" alt="" class="history-thumb">
+                <div class="history-info">
+                    <div class="history-title">${m.titleInput.value}</div>
+                    <div class="history-artist">${m.artistInput.value}</div>
+                </div>
+                <div class="history-badge">MP3</div>
+                <div class="history-status">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </div>
+            `;
+            m.historyList.prepend(item);
+        }
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  VIDEO TAB
+        // ═════════════════════════════════════════════════════════════════════════
+
+        const v = {
+            urlInput:         document.getElementById('videoUrlInput'),
+            fetchBtn:         document.getElementById('videoFetchBtn'),
+            fetchBtnText:     document.querySelector('#videoFetchBtn .btn-text'),
+            fetchSpinner:     document.getElementById('videoFetchSpinner'),
+            skeletonPanel:    document.getElementById('videoSkeletonPanel'),
+            infoPanel:        document.getElementById('videoInfoPanel'),
+            thumbPreview:     document.getElementById('videoThumbPreview'),
+            duration:         document.getElementById('videoDuration'),
+            title:            document.getElementById('videoTitle'),
+            channel:          document.getElementById('videoChannel'),
+            views:            document.getElementById('videoViews'),
+            date:             document.getElementById('videoDate'),
+            descToggleBtn:    document.getElementById('descToggleBtn'),
+            descPanel:        document.getElementById('descriptionPanel'),
+            descText:         document.getElementById('descriptionText'),
+            thumbDownloadBtn: document.getElementById('thumbDownloadBtn'),
+            qualitySelect:    document.getElementById('qualitySelect'),
+            typeSelect:       document.getElementById('downloadTypeSelect'),
+            typeHint:         document.getElementById('downloadTypeHint'),
+            audioGroup:       document.getElementById('audioLanguageGroup'),
+            audioSelect:      document.getElementById('audioLanguageSelect'),
+            subCountBadge:    document.getElementById('subCountBadge'),
+            subSearchInput:   document.getElementById('subSearchInput'),
+            subSearchClear:   document.getElementById('subSearchClear'),
+            subChips:         document.querySelectorAll('.subtitles-section .sub-chip'),
+            subtitleSelect:   document.getElementById('subtitleSelect'),
+            subtitleDownBtn:  document.getElementById('subtitleDownloadBtn'),
+            downloadBtn:      document.getElementById('videoDownloadBtn'),
+            downloadBtnText:  document.querySelector('#videoDownloadBtn .btn-text'),
+            progressSection:  document.getElementById('videoProgressSection'),
+            vpLabel:          document.getElementById('vpLabel'),
+            vpPercent:        document.getElementById('vpPercent'),
+            vpFill:           document.getElementById('vpFill'),
+            vpSpeed:          document.getElementById('vpSpeed'),
+            vpEta:            document.getElementById('vpEta'),
+            consoleToggle:    document.getElementById('consoleToggle'),
+            consolePanel:     document.getElementById('consolePanel'),
+            consoleOutput:    document.getElementById('consoleOutput'),
+            historyList:      document.getElementById('videoHistoryList'),
+            emptyHistory:     document.getElementById('emptyVideoHistory'),
+            editorModeCheckbox:        document.getElementById('editorModeCheckbox'),
+            videoSponsorBlockCheckbox: document.getElementById('videoSponsorBlockCheckbox'),
+            splitChaptersCard:         document.getElementById('splitChaptersCard'),
+            splitChaptersCheckbox:     document.getElementById('splitChaptersCheckbox'),
+            splitChaptersTitle:        document.getElementById('splitChaptersTitle'),
+            chaptersCountTag:          document.getElementById('chaptersCountTag'),
+            clipTrimToggle:            document.getElementById('clipTrimToggle'),
+            clipInputsGrid:            document.getElementById('clipInputsGrid'),
+            clipStartTime:             document.getElementById('clipStartTime'),
+            clipEndTime:               document.getElementById('clipEndTime'),
+            metaFilesize:              document.getElementById('videoMetaFilesize'),
+            selectedSizeDisplay:       document.getElementById('videoSelectedSizeDisplay'),
+            selectedSizeHint:          document.getElementById('videoSelectedSizeHint'),
+        };
+
+        // Modal Elements
+        const dlModal = {
+            modal:            document.getElementById('downloadConfirmModal'),
+            closeBtn:         document.getElementById('dlModalCloseBtn'),
+            cancelBtn:        document.getElementById('modalCancelBtn'),
+            confirmBtn:       document.getElementById('modalConfirmBtn'),
+            thumb:            document.getElementById('modalVideoThumb'),
+            title:            document.getElementById('modalVideoTitle'),
+            qualityTag:       document.getElementById('modalQualityTag'),
+            filesizeTag:      document.getElementById('modalFilesizeTag'),
+            typeTag:          document.getElementById('modalTypeTag'),
+            audioTag:         document.getElementById('modalAudioTag'),
+            editorTag:        document.getElementById('modalEditorTag'),
+            clipTag:          document.getElementById('modalClipTag'),
+            sponsorTag:       document.getElementById('modalSponsorTag'),
+            chaptersTag:      document.getElementById('modalChaptersTag'),
+            audioSection:     document.getElementById('modalAudioSection'),
+            audioSelect:      document.getElementById('modalAudioSelect'),
+            subtitleSection:  document.getElementById('modalSubtitleSection'),
+            embedSubsCheckbox:document.getElementById('embedSubsCheckbox'),
+            subsPanel:        document.getElementById('modalSubsPanel'),
+            subSearch:        document.getElementById('modalSubSearch'),
+            subClear:         document.getElementById('modalSubClear'),
+            subChips:         document.querySelectorAll('#downloadConfirmModal .sub-chip'),
+            subList:          document.getElementById('modalSubtitlesList'),
+            subsPrimaryList:  document.getElementById('modalSubsPrimaryList'),
+            subsSecondaryList:document.getElementById('modalSubsSecondaryList'),
+            moreSubsWrapper:  document.getElementById('moreSubsWrapper'),
+            btnToggleMoreSubs:document.getElementById('btnToggleMoreSubs'),
+            btnToggleMoreSubsText: document.getElementById('btnToggleMoreSubsText'),
+            moreSubsCollapse: document.getElementById('moreSubsCollapse'),
+            noSubsMessage:    document.getElementById('noSubsMessage'),
+            selectedCount:    document.getElementById('selectedSubsCount'),
+            btnSelectEs:      document.getElementById('btnSelectEs'),
+            btnSelectEn:      document.getElementById('btnSelectEn'),
+            btnSelectCreator: document.getElementById('btnSelectCreator'),
+            btnClearSubs:     document.getElementById('btnClearSubs'),
+        };
+
+        let videoUrl = '';
+        let videoData = null; // full info from API
+        let currentSubtitles = []; // all subtitles [{code, name, type, badge}]
+        let currentAudioTracks = [];
+        let currentEventSource = null;
+
+        // ── Dynamic Estimated Filesize Display ────────────────────────────────
+        function updateSelectedFilesizeDisplay() {
+            if (!videoData) return;
+            const height = parseInt(v.qualitySelect.value) || 0;
+            const type = v.typeSelect.value;
+            const selectedOpt = v.qualitySelect.options[v.qualitySelect.selectedIndex];
+            const qualObj = (videoData.qualities || []).find(q => q.height === height);
+
+            let displaySize = '~100 MB';
+            let hint = '(Video + Audio)';
+
+            if (type === 'audio_only') {
+                displaySize = videoData.audio_filesize_mb || '~5.0 MB';
+                hint = '(Audio MP3 • 192 kbps)';
+            } else if (type === 'video_only') {
+                displaySize = qualObj?.video_filesize_mb || qualObj?.filesize_mb || '~80 MB';
+                hint = `(${selectedOpt?.textContent?.split('—')[0]?.trim() || height + 'p'} • Solo Video)`;
+            } else {
+                displaySize = qualObj?.filesize_mb || '~120 MB';
+                hint = `(${selectedOpt?.textContent?.split('—')[0]?.trim() || height + 'p'} • Video + Audio)`;
+            }
+
+            if (v.selectedSizeDisplay) v.selectedSizeDisplay.textContent = displaySize;
+            if (v.selectedSizeHint) v.selectedSizeHint.textContent = hint;
+            if (v.metaFilesize) v.metaFilesize.textContent = `📦 ${displaySize}`;
+            if (dlModal.filesizeTag) dlModal.filesizeTag.textContent = `📦 ${displaySize}`;
+        }
+
+        // ── Subtitle Filtering in Main Video Card ──────────────────────────────
+        function isSubtitleMatch(sub, query, chip) {
+            // Chip filter
+            if (chip === 'creator' && sub.type !== 'manual') return false;
+            if (chip === 'auto' && sub.type !== 'auto') return false;
+            if (chip === 'es') {
+                const codeL = sub.code.toLowerCase();
+                const nameL = sub.name.toLowerCase();
+                if (!codeL.startsWith('es') && !nameL.includes('espanol') && !nameL.includes('español')) return false;
+            }
+            if (chip === 'en') {
+                const codeL = sub.code.toLowerCase();
+                const nameL = sub.name.toLowerCase();
+                if (!codeL.startsWith('en') && !nameL.includes('ingles') && !nameL.includes('inglés')) return false;
+            }
+
+            // Keyword text filter
+            if (query) {
+                const q = query.toLowerCase();
+                const matchCode = sub.code.toLowerCase().includes(q);
+                const matchName = sub.name.toLowerCase().includes(q);
+                const matchType = sub.type === 'manual' ? 'creador manual'.includes(q) : 'auto automatica ia'.includes(q);
+                if (!matchCode && !matchName && !matchType) return false;
+            }
+            return true;
+        }
+
+        function renderMainSubtitles() {
+            const query = v.subSearchInput.value.trim().toLowerCase();
+            const activeChip = document.querySelector('.subtitles-section .sub-chip.active');
+            const chip = activeChip ? activeChip.dataset.filter : 'all';
+
+            v.subtitleSelect.innerHTML = '';
+            const filtered = currentSubtitles.filter(s => isSubtitleMatch(s, query, chip));
+
+            if (filtered.length === 0) {
+                const opt = document.createElement('option');
+                opt.value = '';
+                opt.textContent = currentSubtitles.length === 0
+                    ? '-- Sin subtitulos disponibles --'
+                    : '-- No hay subtítulos que coincidan con la búsqueda --';
+                v.subtitleSelect.appendChild(opt);
+                v.subtitleDownBtn.disabled = true;
+                return;
+            }
+
+            const manual = filtered.filter(s => s.type === 'manual');
+            const auto = filtered.filter(s => s.type === 'auto');
+
+            if (manual.length > 0) {
+                const grp = document.createElement('optgroup');
+                grp.label = `🎨 Subtítulos del Creador (${manual.length})`;
+                manual.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = `${s.code}|manual`;
+                    opt.textContent = `[Creador] ${s.name} (${s.code})`;
+                    grp.appendChild(opt);
+                });
+                v.subtitleSelect.appendChild(grp);
+            }
+
+            if (auto.length > 0) {
+                const grp = document.createElement('optgroup');
+                grp.label = `🤖 Subtítulos Automáticos - IA (${auto.length})`;
+                auto.forEach(s => {
+                    const opt = document.createElement('option');
+                    opt.value = `${s.code}|auto`;
+                    opt.textContent = `[Auto] ${s.name} (${s.code})`;
+                    grp.appendChild(opt);
+                });
+                v.subtitleSelect.appendChild(grp);
+            }
+
+            v.subtitleDownBtn.disabled = false;
+        }
+
+        // Main subtitle search input events
+        v.subSearchInput.addEventListener('input', () => {
+            v.subSearchClear.classList.toggle('hidden', !v.subSearchInput.value);
+            renderMainSubtitles();
+        });
+
+        v.subSearchClear.addEventListener('click', () => {
+            v.subSearchInput.value = '';
+            v.subSearchClear.classList.add('hidden');
+            renderMainSubtitles();
+        });
+
+        v.subChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                v.subChips.forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                renderMainSubtitles();
+            });
+        });
+
+        // Clip Trimmer Toggle
+        if (v.clipTrimToggle) {
+            v.clipTrimToggle.addEventListener('change', () => {
+                v.clipInputsGrid.classList.toggle('hidden', !v.clipTrimToggle.checked);
+                if (v.clipTrimToggle.checked && v.clipStartTime) {
+                    v.clipStartTime.focus();
+                }
+            });
+        }
+
+        // ── Fetch Video Info ───────────────────────────────────────────────────
+        v.fetchBtn.addEventListener('click', async () => {
+            const url = v.urlInput.value.trim();
+            if (!url) { showToast('Ingresa un enlace valido.', 'error'); return; }
+
+            videoUrl = url;
+            v.fetchBtn.disabled = true;
+            v.fetchBtnText.classList.add('hidden');
+            v.fetchSpinner.classList.remove('hidden');
+            v.infoPanel.classList.add('hidden');
+            v.infoPanel.classList.remove('slide-in');
+            v.skeletonPanel.classList.remove('hidden');
+            v.descPanel.classList.add('hidden');
+            v.consolePanel.classList.add('hidden');
+            v.progressSection.classList.add('hidden');
+            v.consoleOutput.innerHTML = '';
+
+            try {
+                const cookies_from_browser = getSelectedCookieBrowser();
+                const res = await fetch('/api/video/info', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url, cookies_from_browser}),
+                });
+                const data = await res.json();
+                if (!data.success) {
+                    if (data.diagnostic) showDiagnostic(data.diagnostic);
+                    throw new Error(data.error);
+                }
+                hideDiagnostic();
+
+                videoData = data;
+
+                // Populate UI
+                v.thumbPreview.src         = data.thumbnail_url || '';
+                v.duration.textContent     = formatDuration(data.duration);
+                v.title.textContent        = data.title || 'Sin titulo';
+                v.channel.textContent      = data.channel || '';
+                v.views.textContent        = formatNumber(data.view_count) + ' vistas';
+                v.date.textContent         = data.upload_date || '';
+                v.descText.textContent     = data.description || 'Sin descripcion disponible.';
+
+                // Populate quality dropdown
+                v.qualitySelect.innerHTML = '';
+                if (data.qualities && data.qualities.length > 0) {
+                    data.qualities.forEach((q, i) => {
+                        const opt = document.createElement('option');
+                        opt.value = q.height;
+                        const sizeSuffix = q.filesize_mb ? ` — ${q.filesize_mb}` : '';
+                        opt.textContent = `${q.label}${sizeSuffix}`;
+                        if (i === 0) opt.selected = true;
+                        v.qualitySelect.appendChild(opt);
+                    });
+                } else {
+                    const opt = document.createElement('option');
+                    opt.value = '720';
+                    opt.textContent = '720p (HD)';
+                    v.qualitySelect.appendChild(opt);
+                }
+
+                // Chapters Setup
+                if (data.has_chapters && data.chapters_count > 0) {
+                    v.splitChaptersCard.classList.remove('hidden');
+                    v.splitChaptersTitle.textContent = `📑 Dividir en archivos separados por capítulos (${data.chapters_count} detectados)`;
+                    v.chaptersCountTag.textContent = `${data.chapters_count} capítulos`;
+                    v.splitChaptersCheckbox.checked = false;
+                } else {
+                    v.splitChaptersCard.classList.add('hidden');
+                    v.splitChaptersCheckbox.checked = false;
+                }
+
+                // Reset features state on new video load
+                if (v.clipTrimToggle) v.clipTrimToggle.checked = false;
+                if (v.clipInputsGrid) v.clipInputsGrid.classList.add('hidden');
+                if (v.clipStartTime) v.clipStartTime.value = '';
+                if (v.clipEndTime) v.clipEndTime.value = '';
+                if (v.editorModeCheckbox) v.editorModeCheckbox.checked = false;
+                if (v.videoSponsorBlockCheckbox) v.videoSponsorBlockCheckbox.checked = false;
+
+                // Multi-Audio (Dubbing) Setup
+                currentAudioTracks = data.audio_tracks || [];
+                if (data.has_multi_audio && currentAudioTracks.length > 1) {
+                    v.audioGroup.classList.remove('hidden');
+                    v.audioSelect.innerHTML = '';
+                    dlModal.audioSelect.innerHTML = '';
+
+                    currentAudioTracks.forEach(tr => {
+                        const opt = document.createElement('option');
+                        opt.value = tr.code;
+                        opt.textContent = tr.label;
+                        if (tr.code === 'es' || tr.code.startsWith('es-')) opt.selected = true;
+                        v.audioSelect.appendChild(opt);
+
+                        const mOpt = document.createElement('option');
+                        mOpt.value = tr.code;
+                        mOpt.textContent = tr.label;
+                        if (tr.code === 'es' || tr.code.startsWith('es-')) mOpt.selected = true;
+                        dlModal.audioSelect.appendChild(mOpt);
+                    });
+                } else {
+                    v.audioGroup.classList.add('hidden');
+                    v.audioSelect.innerHTML = '';
+                    dlModal.audioSelect.innerHTML = '';
+                }
+
+                // Subtitles Setup
+                currentSubtitles = [];
+                if (data.subtitles) {
+                    (data.subtitles.manual || []).forEach(s => currentSubtitles.push({...s, type: 'manual'}));
+                    (data.subtitles.auto || []).forEach(s => currentSubtitles.push({...s, type: 'auto'}));
+                }
+
+                v.subCountBadge.textContent = `${currentSubtitles.length} disponibles`;
+
+                // Reset filter boxes
+                v.subSearchInput.value = '';
+                v.subSearchClear.classList.add('hidden');
+                dlModal.subSearch.value = '';
+                dlModal.subClear.classList.add('hidden');
+
+                // Render main and modal subtitles
+                renderMainSubtitles();
+                buildModalSubtitlesList();
+
+                // Show panel
+                v.skeletonPanel.classList.add('hidden');
+                v.infoPanel.classList.remove('hidden');
+                void v.infoPanel.offsetWidth;
+                v.infoPanel.classList.add('slide-in');
+
+                // Reset download state
+                v.downloadBtn.classList.remove('hidden');
+                v.downloadBtn.disabled = false;
+
+                // Update dynamic filesize indicator
+                updateSelectedFilesizeDisplay();
+
+            } catch(err) {
+                v.skeletonPanel.classList.add('hidden');
+                showToast(err.message, 'error');
+            } finally {
+                v.fetchBtn.disabled = false;
+                v.fetchBtnText.classList.remove('hidden');
+                v.fetchSpinner.classList.add('hidden');
+            }
+        });
+
+        // ── Toggle Description ─────────────────────────────────────────────────
+        v.descToggleBtn.addEventListener('click', () => {
+            v.descPanel.classList.toggle('hidden');
+            const isOpen = !v.descPanel.classList.contains('hidden');
+            const textNode = v.descToggleBtn.lastChild;
+            if (textNode && textNode.nodeType === Node.TEXT_NODE) {
+                textNode.textContent = isOpen ? ' Ocultar Descripcion' : ' Ver Descripcion';
+            }
+        });
+
+        // ── Download Thumbnail ─────────────────────────────────────────────────
+        v.thumbDownloadBtn.addEventListener('click', async () => {
+            if (!videoData) return;
+            v.thumbDownloadBtn.disabled = true;
+            v.thumbDownloadBtn.innerHTML = `
+                <span class="btn-download-icon-sm">
+                    <svg class="spinner" width="14" height="14" viewBox="0 0 24 24" style="border-width:2px;"></svg>
+                </span>
+                <span class="btn-text">Descargando...</span>
+            `;
+            try {
+                const cookies_from_browser = getSelectedCookieBrowser();
+                const res = await fetch('/api/video/thumbnail', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        thumbnail_url: videoData.thumbnail_url,
+                        title: videoData.title,
+                        cookies_from_browser,
+                    }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Miniatura guardada: ${data.filename}`, 'success');
+                    if (data.download_url) {
+                        const a = document.createElement('a');
+                        a.href = data.download_url;
+                        a.download = data.filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                    }
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch(err) {
+                showToast(err.message, 'error');
+            } finally {
+                v.thumbDownloadBtn.disabled = false;
+                v.thumbDownloadBtn.innerHTML = `
+                    <span class="btn-download-icon-sm">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                    </span>
+                    <span class="btn-text">Descargar Miniatura</span>
+                `;
+            }
+        });
+
+        // ── Download Type Change ───────────────────────────────────────────────
+        v.typeSelect.addEventListener('change', () => {
+            const type = v.typeSelect.value;
+            const qualityRow = v.qualitySelect.closest('.option-group');
+
+            if (type === 'audio_only') {
+                qualityRow.style.opacity = '0.4';
+                qualityRow.style.pointerEvents = 'none';
+                v.typeHint.textContent = 'Se descargara el audio en formato MP3 a 192 kbps.';
+                v.typeHint.classList.remove('hidden');
+                v.downloadBtnText.textContent = 'Descargar Audio';
+            } else if (type === 'video_only') {
+                qualityRow.style.opacity = '1';
+                qualityRow.style.pointerEvents = 'auto';
+                v.typeHint.textContent = 'El archivo no contendra audio.';
+                v.typeHint.classList.remove('hidden');
+                v.downloadBtnText.textContent = 'Descargar Video';
+            } else {
+                qualityRow.style.opacity = '1';
+                qualityRow.style.pointerEvents = 'auto';
+                v.typeHint.classList.add('hidden');
+                v.downloadBtnText.textContent = 'Descargar Video';
+            }
+
+            const activeLabel = document.getElementById('activeVideoFolderLabel');
+            if (activeLabel) {
+                activeLabel.textContent = (type === 'audio_only') ? 'Abrir Carpeta Canciones' : 'Abrir Carpeta Videos';
+            }
+
+            // Dynamically recalculate estimated size
+            updateSelectedFilesizeDisplay();
+        });
+
+        // ── Quality Select Change ──────────────────────────────────────────────
+        v.qualitySelect.addEventListener('change', updateSelectedFilesizeDisplay);
+
+        // ── Download Subtitles (Plain Text) ────────────────────────────────────
+        v.subtitleDownBtn.addEventListener('click', async () => {
+            const val = v.subtitleSelect.value;
+            if (!val || !videoUrl) return;
+
+            const [lang, subType] = val.split('|');
+            v.subtitleDownBtn.disabled = true;
+
+            try {
+                const cookies_from_browser = getSelectedCookieBrowser();
+                const res = await fetch('/api/video/subtitles', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: videoUrl, lang, sub_type: subType, cookies_from_browser}),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Transcripcion guardada: ${data.filename}`, 'success');
+                    if (data.download_url) {
+                        const a = document.createElement('a');
+                        a.href = data.download_url;
+                        a.download = data.filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        a.remove();
+                    }
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch(err) {
+                showToast(err.message, 'error');
+            } finally {
+                v.subtitleDownBtn.disabled = false;
+            }
+        });
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  PRE-DOWNLOAD CONFIRMATION MODAL & EMBEDDED SUBTITLES LOGIC
+        // ═════════════════════════════════════════════════════════════════════════
+
+        function updateModalSubsCount() {
+            const checked = dlModal.subList.querySelectorAll('.sub-checkbox:checked');
+            dlModal.selectedCount.textContent = `${checked.length} seleccionado${checked.length === 1 ? '' : 's'}`;
+        }
+
+        function isPrimarySubtitle(s) {
+            if (s.type === 'manual') return true;
+            const code = (s.code || '').toLowerCase();
+            const name = (s.name || '').toLowerCase();
+            const isEs = code === 'es' || code.startsWith('es-') || code.startsWith('es_') || name.includes('espanol') || name.includes('español');
+            const isEn = code === 'en' || code.startsWith('en-') || code.startsWith('en_') || name.includes('ingles') || name.includes('inglés');
+            return isEs || isEn;
+        }
+
+        function buildModalSubtitlesList() {
+            if (dlModal.subsPrimaryList) dlModal.subsPrimaryList.innerHTML = '';
+            if (dlModal.subsSecondaryList) dlModal.subsSecondaryList.innerHTML = '';
+
+            if (currentSubtitles.length === 0) {
+                dlModal.noSubsMessage.classList.remove('hidden');
+                dlModal.subsPanel.classList.add('hidden');
+                dlModal.embedSubsCheckbox.checked = false;
+                dlModal.embedSubsCheckbox.disabled = true;
+                if (dlModal.moreSubsWrapper) dlModal.moreSubsWrapper.classList.add('hidden');
+                updateModalSubsCount();
+                return;
+            }
+
+            dlModal.noSubsMessage.classList.add('hidden');
+            dlModal.subsPanel.classList.remove('hidden');
+            dlModal.embedSubsCheckbox.disabled = false;
+            dlModal.embedSubsCheckbox.checked = true;
+
+            let spanishSelected = false;
+            let secondaryCount = 0;
+
+            currentSubtitles.forEach(s => {
+                const row = document.createElement('label');
+                row.className = 'sub-item-row';
+                row.dataset.code = (s.code || '').toLowerCase();
+                row.dataset.name = (s.name || '').toLowerCase();
+                row.dataset.type = s.type;
+
+                // Smart default: pre-check Spanish if available
+                const isSpanish = s.code.toLowerCase() === 'es' || s.code.toLowerCase().startsWith('es-') || s.name.toLowerCase().includes('espanol') || s.name.toLowerCase().includes('español');
+                let shouldCheck = false;
+                if (isSpanish && !spanishSelected) {
+                    shouldCheck = true;
+                    spanishSelected = true;
+                }
+
+                const badgeClass = s.type === 'manual' ? 'badge-creator' : 'badge-auto';
+                const badgeLabel = s.type === 'manual' ? 'Creador' : 'Auto (IA)';
+
+                row.innerHTML = `
+                    <input type="checkbox" value="${s.code}" data-type="${s.type}" class="sub-checkbox" ${shouldCheck ? 'checked' : ''}>
+                    <span class="sub-item-content">
+                        <span class="sub-item-name">${s.name}</span>
+                        <span class="sub-badge ${badgeClass}">${badgeLabel}</span>
+                        <span class="sub-item-code">${s.code}</span>
+                    </span>
+                `;
+
+                row.querySelector('.sub-checkbox').addEventListener('change', updateModalSubsCount);
+
+                if (isPrimarySubtitle(s)) {
+                    if (dlModal.subsPrimaryList) dlModal.subsPrimaryList.appendChild(row);
+                    else dlModal.subList.appendChild(row);
+                } else {
+                    secondaryCount++;
+                    if (dlModal.subsSecondaryList) dlModal.subsSecondaryList.appendChild(row);
+                    else dlModal.subList.appendChild(row);
+                }
+            });
+
+            if (secondaryCount > 0 && dlModal.moreSubsWrapper) {
+                dlModal.moreSubsWrapper.classList.remove('hidden');
+                if (dlModal.moreSubsCollapse) dlModal.moreSubsCollapse.classList.add('hidden');
+                const icon = dlModal.btnToggleMoreSubs?.querySelector('.more-subs-icon');
+                if (icon) icon.textContent = '▾';
+                if (dlModal.btnToggleMoreSubsText) {
+                    dlModal.btnToggleMoreSubsText.textContent = `Más idiomas (+${secondaryCount} de autotraducción)`;
+                }
+            } else if (dlModal.moreSubsWrapper) {
+                dlModal.moreSubsWrapper.classList.add('hidden');
+            }
+
+            updateModalSubsCount();
+            applyModalSubFilter();
+        }
+
+        function applyModalSubFilter() {
+            const query = dlModal.subSearch.value.trim().toLowerCase();
+            const activeChip = document.querySelector('#downloadConfirmModal .sub-chip.active');
+            const chip = activeChip ? activeChip.dataset.modelfilter : 'all';
+
+            // Auto-expand secondary languages collapse if searching
+            if (query && dlModal.moreSubsCollapse && dlModal.moreSubsCollapse.classList.contains('hidden')) {
+                dlModal.moreSubsCollapse.classList.remove('hidden');
+                const icon = dlModal.btnToggleMoreSubs?.querySelector('.more-subs-icon');
+                if (icon) icon.textContent = '▴';
+                if (dlModal.btnToggleMoreSubsText) {
+                    dlModal.btnToggleMoreSubsText.textContent = 'Ocultar idiomas adicionales';
+                }
+            }
+
+            const rows = dlModal.subList.querySelectorAll('.sub-item-row');
+            rows.forEach(row => {
+                const code = row.dataset.code;
+                const name = row.dataset.name;
+                const type = row.dataset.type;
+
+                let matchesChip = true;
+                if (chip === 'creator') matchesChip = (type === 'manual');
+                else if (chip === 'auto') matchesChip = (type === 'auto');
+                else if (chip === 'es') matchesChip = (code.startsWith('es') || name.includes('espanol') || name.includes('español'));
+                else if (chip === 'en') matchesChip = (code.startsWith('en') || name.includes('ingles') || name.includes('inglés'));
+
+                let matchesQuery = true;
+                if (query) {
+                    const matchCode = code.includes(query);
+                    const matchName = name.includes(query);
+                    const matchType = type === 'manual' ? 'creador manual'.includes(query) : 'auto automatica ia'.includes(query);
+                    matchesQuery = (matchCode || matchName || matchType);
+                }
+
+                row.style.display = (matchesChip && matchesQuery) ? 'flex' : 'none';
+            });
+        }
+
+        // Modal Subtitle Search & Clear
+        dlModal.subSearch.addEventListener('input', () => {
+            dlModal.subClear.classList.toggle('hidden', !dlModal.subSearch.value);
+            applyModalSubFilter();
+        });
+
+        dlModal.subClear.addEventListener('click', () => {
+            dlModal.subSearch.value = '';
+            dlModal.subClear.classList.add('hidden');
+            applyModalSubFilter();
+        });
+
+        dlModal.subChips.forEach(chip => {
+            chip.addEventListener('click', () => {
+                dlModal.subChips.forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                applyModalSubFilter();
+            });
+        });
+
+        // Quick selection buttons in modal
+        dlModal.btnSelectEs.addEventListener('click', () => {
+            const rows = dlModal.subList.querySelectorAll('.sub-item-row');
+            let foundCreator = false;
+            // First check if creator Spanish exists
+            rows.forEach(r => {
+                const isEs = r.dataset.code.startsWith('es') || r.dataset.name.includes('espanol') || r.dataset.name.includes('español');
+                if (isEs && r.dataset.type === 'manual') foundCreator = true;
+            });
+            rows.forEach(r => {
+                const isEs = r.dataset.code.startsWith('es') || r.dataset.name.includes('espanol') || r.dataset.name.includes('español');
+                if (isEs) {
+                    const cb = r.querySelector('.sub-checkbox');
+                    if (foundCreator) {
+                        cb.checked = (r.dataset.type === 'manual');
+                    } else {
+                        cb.checked = true;
+                    }
+                }
+            });
+            updateModalSubsCount();
+        });
+
+        dlModal.btnSelectEn.addEventListener('click', () => {
+            const rows = dlModal.subList.querySelectorAll('.sub-item-row');
+            rows.forEach(r => {
+                const isEn = r.dataset.code.startsWith('en') || r.dataset.name.includes('ingles') || r.dataset.name.includes('inglés');
+                if (isEn) r.querySelector('.sub-checkbox').checked = true;
+            });
+            updateModalSubsCount();
+        });
+
+        dlModal.btnSelectCreator.addEventListener('click', () => {
+            const rows = dlModal.subList.querySelectorAll('.sub-item-row');
+            rows.forEach(r => {
+                r.querySelector('.sub-checkbox').checked = (r.dataset.type === 'manual');
+            });
+            updateModalSubsCount();
+        });
+
+        dlModal.btnClearSubs.addEventListener('click', () => {
+            const cbs = dlModal.subList.querySelectorAll('.sub-checkbox');
+            cbs.forEach(cb => cb.checked = false);
+            updateModalSubsCount();
+        });
+
+        // Toggle embedded subtitles enabled / disabled state in modal
+        dlModal.embedSubsCheckbox.addEventListener('change', () => {
+            const on = dlModal.embedSubsCheckbox.checked;
+            dlModal.subsPanel.style.opacity = on ? '1' : '0.4';
+            dlModal.subsPanel.style.pointerEvents = on ? 'auto' : 'none';
+        });
+
+        // Toggle more languages (secondary auto subtitles) collapse
+        if (dlModal.btnToggleMoreSubs) {
+            dlModal.btnToggleMoreSubs.addEventListener('click', () => {
+                if (!dlModal.moreSubsCollapse) return;
+                const isHidden = dlModal.moreSubsCollapse.classList.contains('hidden');
+                const icon = dlModal.btnToggleMoreSubs.querySelector('.more-subs-icon');
+                if (isHidden) {
+                    dlModal.moreSubsCollapse.classList.remove('hidden');
+                    if (icon) icon.textContent = '▴';
+                    if (dlModal.btnToggleMoreSubsText) dlModal.btnToggleMoreSubsText.textContent = 'Ocultar idiomas adicionales';
+                } else {
+                    dlModal.moreSubsCollapse.classList.add('hidden');
+                    if (icon) icon.textContent = '▾';
+                    const secCount = dlModal.subsSecondaryList ? dlModal.subsSecondaryList.querySelectorAll('.sub-item-row').length : 0;
+                    if (dlModal.btnToggleMoreSubsText) dlModal.btnToggleMoreSubsText.textContent = `Más idiomas (+${secCount} de autotraducción)`;
+                }
+            });
+        }
+
+        function closeDownloadModal() {
+            dlModal.modal.classList.add('hidden');
+        }
+
+        dlModal.closeBtn.addEventListener('click', closeDownloadModal);
+        dlModal.cancelBtn.addEventListener('click', closeDownloadModal);
+        dlModal.modal.addEventListener('click', (e) => {
+            if (e.target === dlModal.modal) closeDownloadModal();
+        });
+
+        // ── Video Download Trigger: Open Confirmation Modal ────────────────────
+        v.downloadBtn.addEventListener('click', () => {
+            if (!videoUrl || !videoData) return;
+
+            // Ensure estimated filesize and summary are fresh
+            updateSelectedFilesizeDisplay();
+
+            // Fill summary in modal
+            dlModal.thumb.src = videoData.thumbnail_url || '';
+            dlModal.title.textContent = videoData.title || '';
+            dlModal.qualityTag.textContent = v.qualitySelect.options[v.qualitySelect.selectedIndex]?.textContent || '1080p';
+            dlModal.typeTag.textContent = v.typeSelect.options[v.typeSelect.selectedIndex]?.textContent || 'Video + Audio';
+
+            // Video feature tags in modal
+            if (v.editorModeCheckbox && v.editorModeCheckbox.checked) {
+                dlModal.editorTag.classList.remove('hidden');
+            } else {
+                dlModal.editorTag.classList.add('hidden');
+            }
+
+            if (v.videoSponsorBlockCheckbox && v.videoSponsorBlockCheckbox.checked) {
+                dlModal.sponsorTag.classList.remove('hidden');
+            } else {
+                dlModal.sponsorTag.classList.add('hidden');
+            }
+
+            if (videoData.has_chapters && v.splitChaptersCheckbox && v.splitChaptersCheckbox.checked) {
+                dlModal.chaptersTag.classList.remove('hidden');
+                dlModal.chaptersTag.textContent = `📑 ${videoData.chapters_count} Capítulos`;
+            } else {
+                dlModal.chaptersTag.classList.add('hidden');
+            }
+
+            const hasClip = v.clipTrimToggle && v.clipTrimToggle.checked && (v.clipStartTime.value.trim() || v.clipEndTime.value.trim());
+            if (hasClip) {
+                dlModal.clipTag.classList.remove('hidden');
+                const startStr = v.clipStartTime.value.trim() || '00:00';
+                const endStr = v.clipEndTime.value.trim() || 'Fin';
+                dlModal.clipTag.textContent = `✂️ Clip: ${startStr} - ${endStr}`;
+            } else {
+                dlModal.clipTag.classList.add('hidden');
+            }
+
+            // Multi-audio track handling
+            if (videoData.has_multi_audio && currentAudioTracks.length > 1) {
+                dlModal.audioSection.classList.remove('hidden');
+                dlModal.audioTag.classList.remove('hidden');
+                dlModal.audioTag.textContent = v.audioSelect.options[v.audioSelect.selectedIndex]?.textContent || 'Audio';
+                dlModal.audioSelect.value = v.audioSelect.value;
+            } else {
+                dlModal.audioSection.classList.add('hidden');
+                dlModal.audioTag.classList.add('hidden');
+            }
+
+            // Sync audio select change inside modal with tag
+            dlModal.audioSelect.onchange = () => {
+                dlModal.audioTag.textContent = dlModal.audioSelect.options[dlModal.audioSelect.selectedIndex]?.textContent || 'Audio';
+                v.audioSelect.value = dlModal.audioSelect.value;
+            };
+
+            // If audio_only, hide subtitle section
+            if (v.typeSelect.value === 'audio_only') {
+                dlModal.subtitleSection.classList.add('hidden');
+            } else {
+                dlModal.subtitleSection.classList.remove('hidden');
+            }
+
+            // Open modal
+            dlModal.modal.classList.remove('hidden');
+        });
+
+        // ── Confirm Download from Modal ─────────────────────────────────────────
+        dlModal.confirmBtn.addEventListener('click', async () => {
+            closeDownloadModal();
+
+            const height = v.qualitySelect.value;
+            const type = v.typeSelect.value;
+            const audio_lang = (videoData.has_multi_audio && dlModal.audioSelect.value) ? dlModal.audioSelect.value : null;
+
+            // Extra options
+            const editor_mode = v.editorModeCheckbox ? v.editorModeCheckbox.checked : false;
+            const sponsorblock = v.videoSponsorBlockCheckbox ? v.videoSponsorBlockCheckbox.checked : false;
+            const split_chapters = (v.splitChaptersCard && !v.splitChaptersCard.classList.contains('hidden') && v.splitChaptersCheckbox) ? v.splitChaptersCheckbox.checked : false;
+            const start_time = (v.clipTrimToggle && v.clipTrimToggle.checked && v.clipStartTime && v.clipStartTime.value.trim()) ? v.clipStartTime.value.trim() : null;
+            const end_time = (v.clipTrimToggle && v.clipTrimToggle.checked && v.clipEndTime && v.clipEndTime.value.trim()) ? v.clipEndTime.value.trim() : null;
+            const cookies_from_browser = getSelectedCookieBrowser();
+
+            // Subtitle parameters
+            let embed_subs = false;
+            let sub_langs = [];
+            let write_auto_sub = false;
+            let write_manual_sub = false;
+
+            if (type !== 'audio_only' && dlModal.embedSubsCheckbox.checked && !dlModal.embedSubsCheckbox.disabled) {
+                const checkedBoxes = dlModal.subList.querySelectorAll('.sub-checkbox:checked');
+                if (checkedBoxes.length > 0) {
+                    embed_subs = true;
+                    checkedBoxes.forEach(cb => {
+                        const code = cb.value;
+                        if (!sub_langs.includes(code)) sub_langs.push(code);
+                        if (cb.dataset.type === 'manual') write_manual_sub = true;
+                        if (cb.dataset.type === 'auto') write_auto_sub = true;
+                    });
+                }
+            }
+
+            // Start download UI
+            v.downloadBtn.disabled = true;
+            v.downloadBtn.classList.add('hidden');
+            v.progressSection.classList.remove('hidden');
+            v.vpFill.style.width = '0%';
+            v.vpPercent.textContent = '0%';
+            v.vpLabel.textContent = 'Iniciando descarga...';
+            v.vpSpeed.textContent = '';
+            v.vpEta.textContent = '';
+
+            try {
+                const res = await fetch('/api/video/download', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        url: videoUrl,
+                        height: parseInt(height),
+                        type,
+                        title: videoData.title,
+                        audio_lang,
+                        embed_subs,
+                        sub_langs,
+                        write_auto_sub,
+                        write_manual_sub,
+                        editor_mode,
+                        sponsorblock,
+                        split_chapters,
+                        start_time,
+                        end_time,
+                        cookies_from_browser,
+                    }),
+                });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                // Connect to SSE for progress
+                const taskId = data.task_id;
+                if (currentEventSource) currentEventSource.close();
+
+                currentEventSource = new EventSource(`/api/video/progress/${taskId}`);
+
+                currentEventSource.onmessage = (event) => {
+                    const p = JSON.parse(event.data);
+
+                    switch(p.status) {
+                        case 'downloading':
+                            v.vpLabel.textContent = 'Descargando...';
+                            v.vpPercent.textContent = p.percent.toFixed(1) + '%';
+                            v.vpFill.style.width = p.percent + '%';
+                            v.vpSpeed.textContent = p.speed || '';
+                            v.vpEta.textContent = p.eta ? `ETA: ${p.eta}` : '';
+                            break;
+
+                        case 'processing':
+                            v.vpLabel.textContent = p.message || 'Procesando...';
+                            v.vpPercent.textContent = '';
+                            v.vpFill.style.width = '100%';
+                            v.vpFill.classList.add('pulsing');
+                            v.vpSpeed.textContent = '';
+                            v.vpEta.textContent = '';
+                            break;
+
+                        case 'complete':
+                            showToast(`Descarga completada: ${p.filename}`, 'success');
+                            addVideoHistory(p.filename, type);
+                            finishVideoDownload();
+                            currentEventSource.close();
+                            currentEventSource = null;
+                            break;
+
+                        case 'error':
+                            showToast(`Error: ${p.message}`, 'error');
+                            if (p.diagnostic) showDiagnostic(p.diagnostic);
+                            finishVideoDownload();
+                            currentEventSource.close();
+                            currentEventSource = null;
+                            break;
+
+                        case 'log':
+                            appendConsole(p.message);
+                            break;
+
+                        case 'heartbeat':
+                            break;
+                    }
+                };
+
+                currentEventSource.onerror = () => {
+                    showToast('Se perdio la conexion con el servidor.', 'error');
+                    finishVideoDownload();
+                    if (currentEventSource) { currentEventSource.close(); currentEventSource = null; }
+                };
+
+            } catch(err) {
+                showToast(err.message, 'error');
+                finishVideoDownload();
+            }
+        });
+
+        function finishVideoDownload() {
+            v.progressSection.classList.add('hidden');
+            v.downloadBtn.classList.remove('hidden');
+            v.downloadBtn.disabled = false;
+            v.vpFill.classList.remove('pulsing');
+        }
+
+        function appendConsole(msg) {
+            if (!msg) return;
+            const line = document.createElement('div');
+            line.className = 'console-line';
+            line.textContent = msg;
+            v.consoleOutput.appendChild(line);
+            v.consoleOutput.scrollTop = v.consoleOutput.scrollHeight;
+        }
+
+        function addVideoHistory(filename, type) {
+            v.emptyHistory.style.display = 'none';
+            const badge = type === 'audio_only' ? 'MP3' : 'MP4';
+            const item = document.createElement('div');
+            item.className = 'history-item';
+            item.innerHTML = `
+                <img src="${v.thumbPreview.src}" alt="" class="history-thumb history-thumb-video">
+                <div class="history-info">
+                    <div class="history-title">${videoData.title}</div>
+                    <div class="history-artist">${videoData.channel}</div>
+                </div>
+                <div class="history-badge">${badge}</div>
+                <div class="history-status">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </div>
+            `;
+            v.historyList.prepend(item);
+        }
+
+        // ── Console Toggle ─────────────────────────────────────────────────────
+        v.consoleToggle.addEventListener('click', () => {
+            v.consolePanel.classList.toggle('hidden');
+            const chevron = v.consoleToggle.querySelector('.chevron');
+            chevron.style.transform = v.consolePanel.classList.contains('hidden')
+                ? 'rotate(0deg)' : 'rotate(180deg)';
+        });
+
+        // ── Active Destination Helper ──────────────────────────────────────────
+        window.getActiveVideoDestination = function() {
+            const typeSelect = document.getElementById('downloadTypeSelect');
+            if (typeSelect && typeSelect.value === 'audio_only') {
+                return 'canciones';
+            }
+            return 'videos';
+        };
+
+        // ── Open Folder ────────────────────────────────────────────────────────
+        window.openFolder = async function(target) {
+            const folderLabels = {
+                'canciones': 'Canciones',
+                'videos': 'Videos',
+                'subtitulos': 'Solo Subtítulos',
+                'miniaturas': 'Miniaturas'
+            };
+            const friendlyName = folderLabels[target] || target;
+            try {
+                const res = await fetch('/api/open-folder', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({folder: target})
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(`Carpeta "${friendlyName}" abierta en el explorador.`, 'success');
+                } else {
+                    showToast(data.error || 'No se pudo abrir la carpeta.', 'error');
+                }
+            } catch(e) {
+                showToast('Error al abrir la carpeta: ' + e.message, 'error');
+            }
+        };
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  SYSTEM MAINTENANCE, DIAGNOSTICS & SELF-UPDATES
+        // ═════════════════════════════════════════════════════════════════════════
+        const sys = {
+            statusBtn:        document.getElementById('systemStatusBtn'),
+            statusDot:        document.getElementById('statusDot'),
+            versionText:      document.getElementById('systemVersionText'),
+            updateAlertBadge: document.getElementById('updateAlertBadge'),
+
+            modal:            document.getElementById('systemModal'),
+            modalCloseBtn:    document.getElementById('modalCloseBtn'),
+            pcVersion:        document.getElementById('modalPcVersion'),
+            portableVersion:  document.getElementById('modalPortableVersion'),
+            portableSub:      document.getElementById('modalPortableSub'),
+            latestVersion:    document.getElementById('modalLatestVersion'),
+            updateBadge:      document.getElementById('modalUpdateBadge'),
+            runUpdateBtn:     document.getElementById('runUpdateBtn'),
+            clearCacheBtn:    document.getElementById('clearCacheBtn'),
+            updateStatusText: document.getElementById('updateStatusText'),
+            updateConsole:    document.getElementById('updateConsoleOutput'),
+
+            diagnosticCard:   document.getElementById('diagnosticCard'),
+            diagTitle:        document.getElementById('diagTitle'),
+            diagMessage:      document.getElementById('diagMessage'),
+            diagSuggestion:   document.getElementById('diagSuggestion'),
+            diagFixBtn:       document.getElementById('diagFixBtn'),
+            diagReportBugBtn: document.getElementById('diagReportBugBtn'),
+            diagDismissBtn:   document.getElementById('diagDismissBtn'),
+        };
+
+        let currentUpdateEventSource = null;
+        let currentActiveDiagnostic = null;
+        let currentActiveFailedUrl = '';
+
+        function showDiagnostic(diag, failedUrl = '') {
+            if (!diag) return;
+            currentActiveDiagnostic = diag;
+            currentActiveFailedUrl = failedUrl || (m.urlInput.value || v.urlInput.value || '').trim();
+            sys.diagTitle.textContent = diag.title || 'Problema de conexión con YouTube';
+            sys.diagMessage.textContent = diag.message || '';
+            sys.diagSuggestion.textContent = diag.suggestion || '';
+            if (diag.can_auto_fix) {
+                sys.diagFixBtn.classList.remove('hidden');
+            } else {
+                sys.diagFixBtn.classList.add('hidden');
+            }
+            if (sys.diagReportBugBtn) {
+                sys.diagReportBugBtn.disabled = false;
+                sys.diagReportBugBtn.textContent = '🐞 Reportar este fallo a Alex';
+            }
+            sys.diagnosticCard.classList.remove('hidden');
+            sys.diagnosticCard.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        }
+
+        function hideDiagnostic() {
+            sys.diagnosticCard.classList.add('hidden');
+        }
+
+        sys.diagDismissBtn.addEventListener('click', hideDiagnostic);
+        sys.diagFixBtn.addEventListener('click', () => {
+            openSystemModal();
+            runSystemUpdate();
+        });
+
+        if (sys.diagReportBugBtn) {
+            sys.diagReportBugBtn.addEventListener('click', async () => {
+                const targetUrl = currentActiveFailedUrl || (m.urlInput.value || v.urlInput.value || '').trim() || 'N/A';
+                const errMsg = sys.diagMessage.textContent || sys.diagTitle.textContent || 'Fallo detectado por el usuario';
+
+                sys.diagReportBugBtn.disabled = true;
+                sys.diagReportBugBtn.textContent = 'Enviando reporte a Alex...';
+
+                try {
+                    const res = await fetch('/api/system/report-bug', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            url: targetUrl,
+                            error: errMsg,
+                            diagnostic: currentActiveDiagnostic || {}
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        showToast('¡Reporte enviado con éxito a Alex!', 'success');
+                        sys.diagReportBugBtn.textContent = '✓ Reportado a Alex';
+                    } else {
+                        throw new Error(data.error || 'No se pudo registrar el reporte');
+                    }
+                } catch(err) {
+                    showToast('Error al enviar reporte: ' + err.message, 'error');
+                    sys.diagReportBugBtn.disabled = false;
+                    sys.diagReportBugBtn.textContent = '🐞 Reintentar Reporte';
+                }
+            });
+        }
+
+        async function checkSystemStatus() {
+            try {
+                const res = await fetch('/api/system/status');
+                const data = await res.json();
+                if (!data.success) return;
+
+                sys.versionText.textContent = `yt-dlp v${data.installed_version}`;
+                sys.pcVersion.textContent = `v${data.installed_version}`;
+
+                if (data.has_portable) {
+                    sys.portableVersion.textContent = `v${data.portable_version || data.installed_version}`;
+                    sys.portableSub.textContent = 'Carpeta Portable sincronizada';
+                } else {
+                    sys.portableVersion.textContent = 'No creada';
+                    sys.portableSub.textContent = 'Solo instalación local';
+                }
+
+                sys.latestVersion.textContent = `v${data.latest_version}`;
+
+                if (data.update_available) {
+                    sys.statusDot.className = 'status-dot warning';
+                    sys.updateAlertBadge.classList.remove('hidden');
+                    sys.updateBadge.textContent = '¡Nueva versión!';
+                    sys.updateBadge.className = 'v-sub text-warning';
+                } else {
+                    sys.statusDot.className = 'status-dot online';
+                    sys.updateAlertBadge.classList.add('hidden');
+                    sys.updateBadge.textContent = 'Al día';
+                    sys.updateBadge.className = 'v-sub text-success';
+                }
+
+                // Consultar actualización remota de la App en GitHub (OTA)
+                try {
+                    const appRes = await fetch('/api/system/check-app-update');
+                    const appData = await appRes.json();
+                    if (appData && appData.update_available) {
+                        sys.statusDot.className = 'status-dot warning';
+                        sys.updateAlertBadge.classList.remove('hidden');
+                        sys.versionText.textContent = `yt-dlp v${data.installed_version} • ¡App v${appData.latest_version} disponible!`;
+                        sys.updateBadge.textContent = `¡App v${appData.latest_version}!`;
+                        sys.updateBadge.className = 'v-sub text-warning';
+                    }
+                } catch(appErr) {
+                    // Ignore background check failure
+                }
+            } catch(e) {
+                sys.versionText.textContent = 'yt-dlp activo';
+                sys.statusDot.className = 'status-dot online';
+            }
+        }
+
+        function openSystemModal() {
+            sys.modal.classList.remove('hidden');
+            checkSystemStatus();
+        }
+
+        function closeSystemModal() {
+            sys.modal.classList.add('hidden');
+        }
+
+        sys.statusBtn.addEventListener('click', openSystemModal);
+        sys.modalCloseBtn.addEventListener('click', closeSystemModal);
+        sys.modal.addEventListener('click', (e) => {
+            if (e.target === sys.modal) closeSystemModal();
+        });
+
+        async function runSystemUpdate() {
+            sys.runUpdateBtn.disabled = true;
+            sys.updateStatusText.textContent = 'Actualizando motor...';
+            sys.updateConsole.innerHTML = '';
+
+            try {
+                const res = await fetch('/api/system/update', {method: 'POST'});
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                const taskId = data.task_id;
+                if (currentUpdateEventSource) currentUpdateEventSource.close();
+
+                currentUpdateEventSource = new EventSource(`/api/system/update-progress/${taskId}`);
+
+                currentUpdateEventSource.onmessage = (event) => {
+                    const p = JSON.parse(event.data);
+
+                    if (p.status === 'log') {
+                        const line = document.createElement('div');
+                        line.className = 'console-line';
+                        line.textContent = p.message;
+                        sys.updateConsole.appendChild(line);
+                        sys.updateConsole.scrollTop = sys.updateConsole.scrollHeight;
+                    } else if (p.status === 'complete') {
+                        sys.updateStatusText.textContent = '¡Actualizado con éxito!';
+                        sys.runUpdateBtn.disabled = false;
+                        showToast(p.message || 'yt-dlp actualizado con éxito.', 'success');
+                        hideDiagnostic();
+                        checkSystemStatus();
+                        currentUpdateEventSource.close();
+                        currentUpdateEventSource = null;
+                    } else if (p.status === 'error') {
+                        sys.updateStatusText.textContent = 'Error en actualización';
+                        sys.runUpdateBtn.disabled = false;
+                        showToast(p.message || 'Error al actualizar yt-dlp.', 'error');
+                        currentUpdateEventSource.close();
+                        currentUpdateEventSource = null;
+                    }
+                };
+
+                currentUpdateEventSource.onerror = () => {
+                    sys.runUpdateBtn.disabled = false;
+                    sys.updateStatusText.textContent = 'Conexión finalizada';
+                    if (currentUpdateEventSource) { currentUpdateEventSource.close(); currentUpdateEventSource = null; }
+                };
+
+            } catch(e) {
+                sys.runUpdateBtn.disabled = false;
+                sys.updateStatusText.textContent = 'Error';
+                showToast(e.message, 'error');
+            }
+        }
+
+        sys.runUpdateBtn.addEventListener('click', runSystemUpdate);
+
+        sys.clearCacheBtn.addEventListener('click', async () => {
+            sys.clearCacheBtn.disabled = true;
+            try {
+                const res = await fetch('/api/system/clear-cache', {method: 'POST'});
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message, 'success');
+                } else {
+                    throw new Error(data.error);
+                }
+            } catch(e) {
+                showToast(e.message, 'error');
+            } finally {
+                sys.clearCacheBtn.disabled = false;
+            }
+        });
+
+        // Initialize system status check
+        checkSystemStatus();
+        setInterval(checkSystemStatus, 300000); // Check every 5 minutes
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  SHUTDOWN
+        // ═════════════════════════════════════════════════════════════════════════
+        document.getElementById('shutdownBtn').addEventListener('click', async () => {
+            if (!confirm('Seguro que quieres apagar el servidor?')) return;
+            try {
+                await fetch('/api/shutdown', {method: 'POST'});
+            } catch(e) { /* connection drops on shutdown */ }
+            document.body.innerHTML = `
+                <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:Inter,sans-serif;color:#9ca3af;">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:1.5rem;opacity:0.6;">
+                        <path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path>
+                        <line x1="12" y1="2" x2="12" y2="12"></line>
+                    </svg>
+                    <h2 style="color:#fff;margin-bottom:0.5rem;">Servidor apagado</h2>
+                    <p>Ya puedes cerrar esta ventana.</p>
+                </div>
+            `;
+        });
+
+    })();
+    </script>
+</body>
+</html>
