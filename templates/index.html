@@ -21,11 +21,14 @@
         <header class="header">
             <div class="header-top-bar">
                 <div class="header-left-tools">
-                    <button id="systemStatusBtn" class="status-pill" title="Mantenimiento y Actualizaciones del Motor">
-                        <span class="status-dot" id="statusDot"></span>
-                        <span id="systemVersionText">yt-dlp comprobando...</span>
-                        <span id="updateAlertBadge" class="update-badge hidden">¡Actualización disponible!</span>
-                    </button>
+                    <div class="header-pill-group">
+                        <button id="systemStatusBtn" class="status-pill" title="Mantenimiento y Actualizaciones del Motor">
+                            <span class="status-dot" id="statusDot"></span>
+                            <span id="systemVersionText">yt-dlp comprobando...</span>
+                            <span id="updateAlertBadge" class="update-badge hidden">¡Actualización disponible!</span>
+                        </button>
+                        <button type="button" class="btn-info-badge btn-info-badge-header" data-info="motor_update" title="¿Por qué se actualiza el motor?">ℹ️ + info</button>
+                    </div>
 
                     <div class="cookie-session-pill" title="Sesión Anti-Bloqueo: Usa cookies del navegador para evitar errores de 'Sign in to confirm you are not a bot' y descargar videos con restricción de edad (+18)">
                         <span class="cookie-icon">🔑</span>
@@ -39,7 +42,12 @@
                             <option value="opera">Opera</option>
                             <option value="vivaldi">Vivaldi</option>
                         </select>
+                        <button type="button" class="btn-info-badge btn-info-badge-inner" data-info="cookies" title="¿Para qué sirven las cookies?">ℹ️ + info</button>
                     </div>
+                    <button type="button" id="headerFeedbackBtn" class="feedback-pill-btn" title="Enviar sugerencia, mensaje o reportar un fallo directamente a Alex">
+                        <span class="feedback-btn-icon">💬</span>
+                        <span class="feedback-btn-text">Contactar a Alex</span>
+                    </button>
                 </div>
 
                 <button id="shutdownBtn" class="btn-shutdown" title="Apagar servidor">
@@ -51,7 +59,7 @@
             </div>
 
             <h1>Descargador <span class="gradient-text">Multimedia Pro</span></h1>
-            <p class="subtitle">Música y Videos en alta calidad &bull; YouTube, TikTok, Reels, X y más &bull; Auto-reparación &bull; Portable</p>
+            <p class="subtitle">YouTube, TikTok sin marca de agua, Reels de IG, X, Twitch, SoundCloud y más. Creado por Alexis.</p>
         </header>
 
         <!-- ═══════ DIAGNOSTIC CARD (Shown on YouTube/Google errors) ═══════ -->
@@ -101,6 +109,18 @@
                     <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
                 </svg>
                 Videos
+            </button>
+            <button class="tab" data-tab="queue">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                </svg>
+                Colas e Historial
+                <span id="queueActiveBadge" class="queue-badge hidden">0</span>
             </button>
         </div>
 
@@ -165,15 +185,16 @@
                     </form>
                 </div>
 
-                <div class="music-options-box">
+                <div class="music-options-box feature-toggle-card music-feature-card">
                     <label class="feature-toggle-label" title="Elimina intros habladas, diálogos de videoclips o silencios antes de convertir a MP3">
-                        <input type="checkbox" id="musicSponsorBlockCheckbox" checked>
+                        <input type="checkbox" id="musicSponsorBlockCheckbox">
                         <span class="toggle-switch-visual"></span>
                         <span class="toggle-text-wrap">
                             <strong>🎵 Omitir intros habladas y silencios de videoclips (SponsorBlock)</strong>
                             <small>Recorta secciones no musicales y diálogos de videoclips para obtener música limpia.</small>
                         </span>
                     </label>
+                    <button type="button" class="btn-info-badge" data-info="sponsorblock" title="¿Cómo funciona SponsorBlock?">ℹ️ + info</button>
                 </div>
                 
                     <div id="musicFilesizeBadge" class="music-filesize-chip hidden">
@@ -182,10 +203,21 @@
                     </div>
 
                     <div class="actions">
-                        <div id="downloadProgress" class="progress-bar-container hidden">
-                            <div class="progress-bar pulsing"></div>
-                            <span class="progress-text">Descargando y procesando audio...</span>
+                        <!-- Music Progress Section -->
+                        <div id="musicProgressSection" class="video-progress-section hidden">
+                            <div class="progress-info-row">
+                                <span id="mpLabel" class="progress-label">Descargando audio...</span>
+                                <span id="mpPercent" class="progress-percent">0%</span>
+                            </div>
+                            <div class="progress-track">
+                                <div id="mpFill" class="progress-fill"></div>
+                            </div>
+                            <div class="progress-meta-row">
+                                <span id="mpSpeed"></span>
+                                <span id="mpEta"></span>
+                            </div>
                         </div>
+
                         <div class="btn-action-group">
                             <button id="downloadBtn" class="btn btn-download-primary full-width">
                                 <span class="btn-download-icon">
@@ -383,6 +415,7 @@
                                     <small>Evita formatos VP9/AV1 problemáticos en programas de edición de vídeo.</small>
                                 </span>
                             </label>
+                            <button type="button" class="btn-info-badge" data-info="editor_mode" title="¿Qué es el modo editores?">ℹ️ + info</button>
                             <span class="feature-pill-tag">Para NLEs</span>
                         </div>
 
@@ -396,6 +429,7 @@
                                     <small>Descarga un video limpio recortando intros y promociones.</small>
                                 </span>
                             </label>
+                            <button type="button" class="btn-info-badge" data-info="sponsorblock" title="¿Cómo funciona SponsorBlock?">ℹ️ + info</button>
                         </div>
 
                         <!-- Split Chapters -->
@@ -408,6 +442,7 @@
                                     <small>Guarda cada capítulo como un archivo MP4 individual y ordenado dentro de una subcarpeta.</small>
                                 </span>
                             </label>
+                            <button type="button" class="btn-info-badge" data-info="split_chapters" title="¿Cómo funciona dividir por capítulos?">ℹ️ + info</button>
                             <span class="feature-pill-tag" id="chaptersCountTag">0 capítulos</span>
                         </div>
 
@@ -422,6 +457,7 @@
                                         <small>Descarga únicamente un fragmento del video especificando el inicio y el fin.</small>
                                     </span>
                                 </label>
+                                <button type="button" class="btn-info-badge" data-info="clip_trimmer" title="¿Cómo recortar un fragmento?">ℹ️ + info</button>
                             </div>
                             <div class="clip-inputs-grid hidden" id="clipInputsGrid">
                                 <div class="clip-field">
@@ -440,14 +476,16 @@
                 </div>
 
                 <!-- Section 3: Subtitles / Transcription Section -->
-                <div class="panel-section-card card-section-subtitles">
+                <div class="panel-section-card card-section-subtitles subtitles-section">
                     <div class="section-card-header">
                         <div class="section-card-title">
                             <span class="section-badge-num section-badge-cyan">3</span>
                             <h4>Subtítulos y Transcripción (Descarga en Texto)</h4>
+                            <button type="button" class="btn-info-badge" data-info="subtitles_info" title="Más información sobre subtítulos">ℹ️ + info</button>
                         </div>
                         <span id="subCountBadge" class="sub-counter-badge">0 disponibles</span>
                     </div>
+                    <p class="section-instruction-sub">Si solo necesitas la transcripción del video descárgalo aquí</p>
 
                     <!-- Search & Quick Filter bar for Subtitles -->
                     <div class="sub-filter-bar">
@@ -572,6 +610,128 @@
                 </div>
             </section>
         </div>
+
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <!-- ═══════ QUEUE & HISTORY TAB ═══════ -->
+        <!-- ═══════════════════════════════════════════════════════════════════ -->
+        <div class="tab-content hidden" id="queueTab">
+
+            <!-- Control de Concurrencia y Resumen -->
+            <section class="card queue-summary-card">
+                <div class="queue-summary-layout">
+                    <div class="queue-concurrency-control">
+                        <div class="concurrency-title-wrap">
+                            <span class="concurrency-icon">⚡</span>
+                            <div>
+                                <h3 class="concurrency-title">Descargas Simultáneas</h3>
+                                <p class="concurrency-desc">Ajusta el límite de trabajadores concurrentes para proteger tu ancho de banda y evitar bloqueos de IP.</p>
+                            </div>
+                        </div>
+                        <div class="worker-buttons-row">
+                            <button type="button" class="btn-worker" data-workers="1">1</button>
+                            <button type="button" class="btn-worker" data-workers="2">2</button>
+                            <button type="button" class="btn-worker active" data-workers="3">3 (Recomendado)</button>
+                            <button type="button" class="btn-worker" data-workers="4">4</button>
+                            <button type="button" class="btn-worker" data-workers="5">5</button>
+                        </div>
+                    </div>
+
+                    <div class="queue-stat-chips-group">
+                        <div class="stat-chip stat-chip-active">
+                            <span class="stat-dot pulsing"></span>
+                            <span class="stat-text">En Curso: <strong id="queueCountActive">0</strong></span>
+                        </div>
+                        <div class="stat-chip stat-chip-pending">
+                            <span class="stat-icon">⏳</span>
+                            <span class="stat-text">En Espera: <strong id="queueCountPending">0</strong></span>
+                        </div>
+                        <div class="stat-chip stat-chip-total">
+                            <span class="stat-icon">💾</span>
+                            <span class="stat-text">Historial: <strong id="queueCountHistory">0</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Panel de Colas Activas y en Espera -->
+            <section class="card queue-active-section">
+                <div class="queue-section-header">
+                    <div class="queue-header-left">
+                        <span class="section-badge-num section-badge-pink">1</span>
+                        <div>
+                            <h2 class="section-title">Cola de Descargas en Tiempo Real</h2>
+                            <p class="section-subtitle">Monitorea el progreso independiente de cada elemento o cancela tareas activas.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="queueCardsContainer" class="queue-cards-list">
+                    <!-- Se inyectan dinámicamente las tarjetas de tareas -->
+                </div>
+
+                <div id="queueEmptyNotice" class="queue-empty-box">
+                    <span class="empty-icon">☕</span>
+                    <p class="empty-title">No hay descargas activas ni en cola</p>
+                    <p class="empty-sub">Cuando inicies una descarga de música o vídeo, aparecerá aquí con su velocidad y progreso en tiempo real.</p>
+                </div>
+            </section>
+
+            <!-- Panel de Historial Persistente en SQLite -->
+            <section class="card history-database-section">
+                <div class="history-main-header">
+                    <div class="history-header-left">
+                        <span class="section-badge-num section-badge-emerald">2</span>
+                        <div>
+                            <h2 class="section-title">Historial Permanente de Descargas</h2>
+                            <p class="section-subtitle">Registro duradero almacenado de forma segura en SQLite (history.db).</p>
+                        </div>
+                    </div>
+                    <div class="history-actions-right">
+                        <button type="button" id="historyRefreshBtn" class="btn-history-tool" title="Actualizar lista desde SQLite">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M1 20v-6h6"></path><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                            <span>Refrescar</span>
+                        </button>
+                        <button type="button" id="historyClearBtn" class="btn-history-tool btn-danger-tool" title="Vaciar todo el historial">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                            <span>Vaciar Historial</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="history-toolbar">
+                    <div class="history-search-box">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="search-icon"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <input type="text" id="historySearchInput" placeholder="Buscar por título, formato, archivo o enlace..." class="history-search-input">
+                    </div>
+                    <div class="history-type-filter-group">
+                        <button type="button" class="history-filter-pill active" data-filter="all">Todos</button>
+                        <button type="button" class="history-filter-pill" data-filter="music">🎵 Música</button>
+                        <button type="button" class="history-filter-pill" data-filter="video">🎬 Vídeos</button>
+                    </div>
+                </div>
+
+                <div class="history-table-wrapper">
+                    <table class="history-table" id="historyTable">
+                        <thead>
+                            <tr>
+                                <th>Tipo</th>
+                                <th>Título y Enlace</th>
+                                <th>Estado</th>
+                                <th>Tamaño</th>
+                                <th>Fecha</th>
+                                <th class="text-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="historyTableBody">
+                            <!-- Se renderiza vía JavaScript desde /api/history -->
+                        </tbody>
+                    </table>
+                    <div id="historyTableEmpty" class="history-empty-message hidden">
+                        No se encontraron registros que coincidan con la búsqueda.
+                    </div>
+                </div>
+            </section>
+        </div>
     </main>
 
     <!-- ═══════ MAINTENANCE & UPDATE MODAL ═══════ -->
@@ -622,14 +782,18 @@
                     </svg>
                     <span class="btn-text">Actualizar yt-dlp y Librerías (1 Clic)</span>
                 </button>
-                <button id="clearCacheBtn" class="btn btn-outline">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 6h18"></path>
-                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
-                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
-                    </svg>
-                    Limpiar Caché
-                </button>
+
+                <div class="clear-cache-container">
+                    <button id="clearCacheBtn" class="btn btn-outline full-width">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                        </svg>
+                        <span>Limpiar Caché</span>
+                    </button>
+                    <button type="button" class="btn-info-emoji-bubble" data-info="clear_cache" title="¿Para qué sirve Limpiar Caché?">ℹ️</button>
+                </div>
             </div>
 
             <!-- Live Update Console -->
@@ -704,6 +868,7 @@
                             <small>Se integrarán dentro del archivo MP4. Podrás activarlos, cambiarlos o apagarlos desde el menú de subtítulos (CC) del reproductor de Windows o VLC.</small>
                         </span>
                     </label>
+                    <button type="button" class="btn-info-badge" data-info="subtitles_info" title="¿Qué son subtítulos incrustados?">ℹ️ + info</button>
                 </div>
 
                 <div id="modalSubsPanel" class="modal-subs-panel">
@@ -788,6 +953,88 @@
         </div>
     </div>
 
+    <!-- ═══════ FEEDBACK & CONTACT MODAL (MESSAGES TO ALEX / DISCORD) ═══════ -->
+    <div id="feedbackModal" class="modal-overlay hidden">
+        <div class="modal-content card feedback-modal-content">
+            <div class="modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-header-emoji">💬</span>
+                    <div>
+                        <h2>Contactar a Alex / Sugerencias</h2>
+                        <span class="v-sub">Tu mensaje llegará directo a su canal privado de Discord</span>
+                    </div>
+                </div>
+                <button type="button" id="feedbackModalCloseBtn" class="modal-close" title="Cerrar">&times;</button>
+            </div>
+
+            <p class="modal-subtitle">
+                ¿Tienes alguna idea para mejorar la app, encontraste un fallo o quieres dejar un mensaje o añadido? Escríbelo abajo y Alex lo leerá directamente.
+            </p>
+
+            <form id="feedbackForm" class="feedback-form" onsubmit="return false;">
+                <div class="form-row-2col">
+                    <div class="form-group">
+                        <label for="feedbackTypeSelect">Tipo de mensaje:</label>
+                        <select id="feedbackTypeSelect" class="select-styled">
+                            <option value="💡 Sugerencia">💡 Sugerencia / Nueva función</option>
+                            <option value="🐞 Reporte de Error">🐞 Reportar un error / fallo</option>
+                            <option value="💬 Mensaje a Alex">💬 Mensaje / Saludo a Alex</option>
+                            <option value="❓ Pregunta / Duda">❓ Pregunta / Duda técnica</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="feedbackSenderInput">Tu nombre o apodo (opcional):</label>
+                        <input type="text" id="feedbackSenderInput" class="input-styled" placeholder="Ej: Juan, Editor..." maxlength="50" autocomplete="off">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="feedbackUrlInput">Enlace / URL relacionada (opcional):</label>
+                    <input type="text" id="feedbackUrlInput" class="input-styled" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+                </div>
+
+                <div class="form-group">
+                    <label for="feedbackMessageText">Mensaje o detalle del problema <span class="required-star" style="color:var(--accent-pink);">*</span>:</label>
+                    <textarea id="feedbackMessageText" class="textarea-styled" rows="4" placeholder="Escribe aquí tu sugerencia, añadido, o qué pasó exactamente..." maxlength="1500"></textarea>
+                </div>
+
+                <div class="feedback-actions">
+                    <button type="button" id="feedbackCancelBtn" class="btn btn-outline">Cancelar</button>
+                    <button type="button" id="sendFeedbackSubmitBtn" class="btn btn-download-primary">
+                        <span class="btn-download-icon-sm">🚀</span>
+                        <span id="sendFeedbackBtnText">Enviar a Discord</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ═══════ PEDAGOGICAL INFO POPUP MODAL (+ INFO) ═══════ -->
+    <div id="infoHelpModal" class="modal-overlay info-help-overlay hidden">
+        <div class="modal-content card info-help-card">
+            <div class="modal-header info-modal-header">
+                <div class="modal-title-wrap">
+                    <span class="modal-header-emoji" id="infoHelpIcon">💡</span>
+                    <div>
+                        <h3 id="infoHelpTitle">Título Informativo</h3>
+                        <span id="infoHelpCategory" class="info-cat-pill">Guía Rápida</span>
+                    </div>
+                </div>
+                <button type="button" id="infoHelpCloseBtn" class="modal-close" title="Cerrar">&times;</button>
+            </div>
+
+            <div class="info-help-body" id="infoHelpBody">
+                <!-- Pedagogical content with visual graphic diagrams injected dynamically -->
+            </div>
+
+            <div class="info-help-footer">
+                <button type="button" id="infoHelpUnderstoodBtn" class="btn btn-download-primary btn-sm">
+                    <span>¡Entendido!</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
     <!-- ═══════ JAVASCRIPT ═══════ -->
     <!-- ═══════════════════════════════════════════════════════════════════════ -->
@@ -801,7 +1048,12 @@
                 document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
-                document.getElementById(tab.dataset.tab + 'Tab').classList.remove('hidden');
+                const targetContent = document.getElementById(tab.dataset.tab + 'Tab');
+                if (targetContent) targetContent.classList.remove('hidden');
+                if (tab.dataset.tab === 'queue') {
+                    if (typeof fetchQueueStatus === 'function') fetchQueueStatus();
+                    if (typeof loadHistory === 'function') loadHistory();
+                }
             });
         });
 
@@ -882,7 +1134,12 @@
             genreInput:      document.getElementById('genreInput'),
             downloadBtn:     document.getElementById('downloadBtn'),
             downloadBtnText: document.querySelector('#downloadBtn .btn-text'),
-            downloadProgress:document.getElementById('downloadProgress'),
+            progressSection: document.getElementById('musicProgressSection'),
+            mpLabel:         document.getElementById('mpLabel'),
+            mpPercent:       document.getElementById('mpPercent'),
+            mpFill:          document.getElementById('mpFill'),
+            mpSpeed:         document.getElementById('mpSpeed'),
+            mpEta:           document.getElementById('mpEta'),
             historyList:     document.getElementById('historyList'),
             emptyHistory:    document.getElementById('emptyHistory'),
             filesizeBadge:   document.getElementById('musicFilesizeBadge'),
@@ -890,10 +1147,27 @@
         };
 
         let musicUrl = '';
+        let musicEventSource = null;
+
+        function finishMusicDownload() {
+            m.downloadBtn.disabled = false;
+            m.downloadBtn.classList.remove('hidden');
+            m.progressSection.classList.add('hidden');
+            m.mpFill.classList.remove('pulsing');
+            m.mpFill.style.width = '0%';
+        }
 
         m.fetchBtn.addEventListener('click', async () => {
             const url = m.urlInput.value.trim();
             if (!url) { showToast('Ingresa un enlace valido.', 'error'); return; }
+
+            if (musicEventSource) {
+                musicEventSource.close();
+                musicEventSource = null;
+            }
+            m.progressSection.classList.add('hidden');
+            m.downloadBtn.classList.remove('hidden');
+            m.downloadBtn.disabled = false;
 
             musicUrl = url;
             m.fetchBtn.disabled = true;
@@ -954,8 +1228,15 @@
                 return;
             }
 
+            m.downloadBtn.disabled = true;
             m.downloadBtn.classList.add('hidden');
-            m.downloadProgress.classList.remove('hidden');
+            m.progressSection.classList.remove('hidden');
+            m.mpFill.style.width = '0%';
+            m.mpPercent.textContent = '0%';
+            m.mpLabel.textContent = 'Iniciando descarga...';
+            m.mpSpeed.textContent = '';
+            m.mpEta.textContent = '';
+            m.mpFill.classList.remove('pulsing');
 
             const sponsorblock = document.getElementById('musicSponsorBlockCheckbox')?.checked ?? false;
 
@@ -976,19 +1257,70 @@
                     }),
                 });
                 const data = await res.json();
-                if (data.success) {
-                    hideDiagnostic();
-                    showToast(`Descarga completada: ${data.filename}`, 'success');
-                    addMusicHistory(data.filename);
-                } else {
+                if (!data.success) {
                     if (data.diagnostic) showDiagnostic(data.diagnostic);
-                    throw new Error(data.error || 'Error al descargar.');
+                    throw new Error(data.error || 'Error al iniciar descarga.');
                 }
+                hideDiagnostic();
+
+                const taskId = data.task_id;
+                if (musicEventSource) musicEventSource.close();
+
+                musicEventSource = new EventSource(`/api/music/progress/${taskId}`);
+
+                musicEventSource.onmessage = (event) => {
+                    const p = JSON.parse(event.data);
+
+                    switch(p.status) {
+                        case 'downloading':
+                            m.mpLabel.textContent = 'Descargando audio...';
+                            m.mpPercent.textContent = p.percent.toFixed(1) + '%';
+                            m.mpFill.style.width = p.percent + '%';
+                            m.mpSpeed.textContent = p.speed || '';
+                            m.mpEta.textContent = p.eta ? `ETA: ${p.eta}` : '';
+                            break;
+
+                        case 'processing':
+                            m.mpLabel.textContent = p.message || 'Procesando y convirtiendo a MP3...';
+                            m.mpPercent.textContent = '';
+                            m.mpFill.style.width = '100%';
+                            m.mpFill.classList.add('pulsing');
+                            m.mpSpeed.textContent = '';
+                            m.mpEta.textContent = '';
+                            break;
+
+                        case 'complete':
+                            showToast(`Descarga completada: ${p.filename}`, 'success');
+                            addMusicHistory(p.filename);
+                            finishMusicDownload();
+                            musicEventSource.close();
+                            musicEventSource = null;
+                            break;
+
+                        case 'error':
+                            showToast(`Error: ${p.message}`, 'error');
+                            if (p.diagnostic) showDiagnostic(p.diagnostic);
+                            finishMusicDownload();
+                            musicEventSource.close();
+                            musicEventSource = null;
+                            break;
+
+                        case 'heartbeat':
+                            break;
+                    }
+                };
+
+                musicEventSource.onerror = () => {
+                    if (musicEventSource) {
+                        musicEventSource.close();
+                        musicEventSource = null;
+                    }
+                    finishMusicDownload();
+                };
+
             } catch(err) {
                 showToast(err.message, 'error');
-            } finally {
-                m.downloadProgress.classList.add('hidden');
-                m.downloadBtn.classList.remove('hidden');
+                finishMusicDownload();
             }
         });
 
@@ -1042,7 +1374,7 @@
             subCountBadge:    document.getElementById('subCountBadge'),
             subSearchInput:   document.getElementById('subSearchInput'),
             subSearchClear:   document.getElementById('subSearchClear'),
-            subChips:         document.querySelectorAll('.subtitles-section .sub-chip'),
+            subChips:         document.querySelectorAll('.card-section-subtitles .sub-chip, .subtitles-section .sub-chip'),
             subtitleSelect:   document.getElementById('subtitleSelect'),
             subtitleDownBtn:  document.getElementById('subtitleDownloadBtn'),
             downloadBtn:      document.getElementById('videoDownloadBtn'),
@@ -1175,7 +1507,7 @@
 
         function renderMainSubtitles() {
             const query = v.subSearchInput.value.trim().toLowerCase();
-            const activeChip = document.querySelector('.subtitles-section .sub-chip.active');
+            const activeChip = document.querySelector('.card-section-subtitles .sub-chip.active, .subtitles-section .sub-chip.active');
             const chip = activeChip ? activeChip.dataset.filter : 'all';
 
             v.subtitleSelect.innerHTML = '';
@@ -2119,38 +2451,405 @@
             runSystemUpdate();
         });
 
-        if (sys.diagReportBugBtn) {
-            sys.diagReportBugBtn.addEventListener('click', async () => {
-                const targetUrl = currentActiveFailedUrl || (m.urlInput.value || v.urlInput.value || '').trim() || 'N/A';
-                const errMsg = sys.diagMessage.textContent || sys.diagTitle.textContent || 'Fallo detectado por el usuario';
+        // ── Feedback & Direct Discord Messaging Modal Controller ─────────────
+        const fbModal = {
+            btn:         document.getElementById('headerFeedbackBtn'),
+            modal:       document.getElementById('feedbackModal'),
+            closeBtn:    document.getElementById('feedbackModalCloseBtn'),
+            cancelBtn:   document.getElementById('feedbackCancelBtn'),
+            submitBtn:   document.getElementById('sendFeedbackSubmitBtn'),
+            submitText:  document.getElementById('sendFeedbackBtnText'),
+            typeSelect:  document.getElementById('feedbackTypeSelect'),
+            senderInput: document.getElementById('feedbackSenderInput'),
+            urlInput:    document.getElementById('feedbackUrlInput'),
+            messageText: document.getElementById('feedbackMessageText'),
+        };
 
-                sys.diagReportBugBtn.disabled = true;
-                sys.diagReportBugBtn.textContent = 'Enviando reporte a Alex...';
+        function openFeedbackModal(type = '💡 Sugerencia', prefillUrl = '', prefillMsg = '') {
+            if (fbModal.typeSelect) fbModal.typeSelect.value = type;
+            if (fbModal.urlInput) {
+                fbModal.urlInput.value = prefillUrl || (m.urlInput.value || v.urlInput.value || '').trim();
+            }
+            if (fbModal.messageText && prefillMsg) {
+                fbModal.messageText.value = prefillMsg;
+            }
+            if (fbModal.submitBtn) {
+                fbModal.submitBtn.disabled = false;
+                fbModal.submitText.textContent = 'Enviar a Discord';
+            }
+            fbModal.modal.classList.remove('hidden');
+            setTimeout(() => fbModal.messageText?.focus(), 100);
+        }
+
+        function closeFeedbackModal() {
+            fbModal.modal.classList.add('hidden');
+        }
+
+        if (fbModal.btn) {
+            fbModal.btn.addEventListener('click', () => openFeedbackModal());
+        }
+        if (fbModal.closeBtn) {
+            fbModal.closeBtn.addEventListener('click', closeFeedbackModal);
+        }
+        if (fbModal.cancelBtn) {
+            fbModal.cancelBtn.addEventListener('click', closeFeedbackModal);
+        }
+        if (fbModal.modal) {
+            fbModal.modal.addEventListener('click', (e) => {
+                if (e.target === fbModal.modal) closeFeedbackModal();
+            });
+        }
+
+        if (fbModal.submitBtn) {
+            fbModal.submitBtn.addEventListener('click', async () => {
+                const message = fbModal.messageText.value.trim();
+                if (!message) {
+                    showToast('Por favor escribe un mensaje o sugerencia.', 'error');
+                    fbModal.messageText.focus();
+                    return;
+                }
+
+                fbModal.submitBtn.disabled = true;
+                fbModal.submitText.textContent = 'Enviando...';
 
                 try {
-                    const res = await fetch('/api/system/report-bug', {
+                    const res = await fetch('/api/system/feedback', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
-                            url: targetUrl,
-                            error: errMsg,
-                            diagnostic: currentActiveDiagnostic || {}
+                            type: fbModal.typeSelect.value,
+                            sender: fbModal.senderInput.value.trim(),
+                            url: fbModal.urlInput.value.trim(),
+                            message: message,
                         })
                     });
                     const data = await res.json();
                     if (data.success) {
-                        showToast('¡Reporte enviado con éxito a Alex!', 'success');
-                        sys.diagReportBugBtn.textContent = '✓ Reportado a Alex';
+                        showToast('¡Tu mensaje ha sido enviado exitosamente a Alex!', 'success');
+                        fbModal.messageText.value = '';
+                        closeFeedbackModal();
                     } else {
-                        throw new Error(data.error || 'No se pudo registrar el reporte');
+                        throw new Error(data.error || 'No se pudo enviar el mensaje.');
                     }
                 } catch(err) {
-                    showToast('Error al enviar reporte: ' + err.message, 'error');
-                    sys.diagReportBugBtn.disabled = false;
-                    sys.diagReportBugBtn.textContent = '🐞 Reintentar Reporte';
+                    showToast('Error al enviar mensaje: ' + err.message, 'error');
+                } finally {
+                    fbModal.submitBtn.disabled = false;
+                    fbModal.submitText.textContent = 'Enviar a Discord';
                 }
             });
         }
+
+        if (sys.diagReportBugBtn) {
+            sys.diagReportBugBtn.addEventListener('click', () => {
+                const targetUrl = currentActiveFailedUrl || (m.urlInput.value || v.urlInput.value || '').trim();
+                const errMsg = sys.diagMessage.textContent || sys.diagTitle.textContent || 'Problema detectado en la descarga.';
+                openFeedbackModal('🐞 Reporte de Error', targetUrl, `Detalle del fallo: ${errMsg}\n\n[Puedes añadir más detalles aquí si lo deseas]`);
+            });
+        }
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  PEDAGOGICAL INFO POPUPS (+ INFO) CONTROLLER & KNOWLEDGE BASE
+        // ═════════════════════════════════════════════════════════════════════════
+        const infoHelp = {
+            modal:         document.getElementById('infoHelpModal'),
+            closeBtn:      document.getElementById('infoHelpCloseBtn'),
+            understoodBtn: document.getElementById('infoHelpUnderstoodBtn'),
+            icon:          document.getElementById('infoHelpIcon'),
+            title:         document.getElementById('infoHelpTitle'),
+            category:      document.getElementById('infoHelpCategory'),
+            body:          document.getElementById('infoHelpBody'),
+        };
+
+        const infoKnowledgeBase = {
+            cookies: {
+                icon: '🔑',
+                title: 'Sesión de Cookies del Navegador',
+                category: 'Protección Anti-Bloqueos (403)',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Para qué sirve?</strong> Es como mostrarle a YouTube tu "pase de usuario registrado" para que sepa que eres una persona real y no un bot malicioso.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="diagram-flow">
+                            <div class="diagram-node danger">
+                                <span>❌ <strong>Sin Cookies</strong></span>
+                                <small>Petición anónima</small>
+                            </div>
+                            <div class="diagram-arrow">➔</div>
+                            <div class="diagram-node barrier">
+                                <span>🛡️ <strong>Antibot YouTube</strong></span>
+                                <small>Sospecha de descarga</small>
+                            </div>
+                            <div class="diagram-arrow">➔</div>
+                            <div class="diagram-node result-bad">
+                                <span>⛔ <strong>Error 403</strong></span>
+                                <small>"Sign in to confirm"</small>
+                            </div>
+                        </div>
+
+                        <div class="diagram-flow success-flow">
+                            <div class="diagram-node success">
+                                <span>✅ <strong>Con tu Navegador</strong></span>
+                                <small>Sesión real autenticada</small>
+                            </div>
+                            <div class="diagram-arrow">➔</div>
+                            <div class="diagram-node pass">
+                                <span>🔓 <strong>Pase directo</strong></span>
+                                <small>Reconocido como humano</small>
+                            </div>
+                            <div class="diagram-arrow">➔</div>
+                            <div class="diagram-node result-good">
+                                <span>📥 <strong>Descarga Exitosa</strong></span>
+                                <small>A máxima velocidad</small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>Desbloquea videos +18:</strong> Videos con restricción de edad que normalmente no se pueden descargar.</li>
+                        <li><strong>Videos privados o de miembros:</strong> Si tienes acceso en tu navegador, podrás descargarlos aquí.</li>
+                        <li><strong>100% Privado y Seguro:</strong> Se lee en la memoria local de tu PC. <strong>Nunca se envían a internet ni a servidores de terceros</strong>.</li>
+                        <li><strong>Regla de uso:</strong> Déjalo en <em>"Ninguna"</em>. Si un video te da error de inicio de sesión o 403, selecciona tu navegador (ej: Chrome o Edge) y reintenta.</li>
+                    </ul>
+                `
+            },
+            motor_update: {
+                icon: '⚡',
+                title: 'Actualizaciones del Motor (yt-dlp)',
+                category: 'Mantenimiento y Auto-Reparación',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Por qué se actualiza?</strong> YouTube, TikTok e Instagram cambian sus algoritmos internos semanalmente para romper los programas de descarga.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="diagram-step warning">
+                            <span class="step-badge warn">1</span>
+                            <div>
+                                <strong>Cambio en YouTube:</strong>
+                                <p>Un video de repente deja de descargar o dice que no encuentra formatos válidos.</p>
+                            </div>
+                        </div>
+                        <div class="diagram-step success">
+                            <span class="step-badge ok">2</span>
+                            <div>
+                                <strong>Pulsas "Actualizar yt-dlp":</strong>
+                                <p>El motor descarga en segundos el parche oficial de los desarrolladores y vuelve a funcionar al instante.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>Actualización Remota de la App (OTA):</strong> Además consulta si Alex publicó mejoras de la interfaz en GitHub y las actualiza solo.</li>
+                        <li><strong>Cero instalaciones manuales:</strong> Todo se ejecuta en segundo plano con una consola en vivo que te muestra el progreso.</li>
+                    </ul>
+                `
+            },
+            clear_cache: {
+                icon: '🧹',
+                title: 'Limpiar Caché de YouTube',
+                category: 'Solución a Errores Inesperados y Actualización de Firmas',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Qué hace el botón de Limpiar Caché?</strong> Borra de inmediato los archivos temporales, cookies caducadas y firmas internas que el motor guardó en tu computadora al procesar videos anteriores de YouTube.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="diagram-step warning">
+                            <span class="step-badge warn">⚠️</span>
+                            <div>
+                                <strong>Caché obsoleta (Causa del error):</strong>
+                                <p>YouTube cambió la protección de su reproductor web hoy, pero tu PC sigue usando los códigos que memorizó ayer.</p>
+                            </div>
+                        </div>
+                        <div class="diagram-step success">
+                            <span class="step-badge ok">✨</span>
+                            <div>
+                                <strong>Al pulsar "Limpiar Caché" (Solución):</strong>
+                                <p>Se eliminan los archivos temporales caducados. La próxima descarga solicitará los códigos y firmas más recientes directamente desde YouTube.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>¿Para qué y cuándo usarlo?</strong> Úsalo si un video que sabes que funciona en tu navegador web te arroja errores como: <em>"Sign in to confirm you are not a bot"</em>, <em>"Signature extraction failed"</em> o <em>"HTTP Error 403: Forbidden"</em>.</li>
+                        <li><strong>Es 100% seguro:</strong> Solo borra la memoria temporal de conexión a YouTube; jamás borrará tus canciones, videos ni miniaturas que ya tengas descargados.</li>
+                    </ul>
+                `
+            },
+            editor_mode: {
+                icon: '🎬',
+                title: 'Modo Compatible con Editores de Video',
+                category: 'Premiere Pro, DaVinci Resolve, Vegas, CapCut',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Para qué sirve?</strong> Adapta el archivo al estándar universal de la industria audiovisual para evitar incompatibilidades.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="compare-row bad">
+                            <div class="compare-tag">❌ Descarga Estándar de YouTube</div>
+                            <div class="compare-desc">Códecs ultra-comprimidos <strong>VP9 / AV1</strong> + Audio <strong>Opus</strong> ➔ <span style="color:#fca5a5;">Pantalla negra, lag o audio desincronizado en programas de edición.</span></div>
+                        </div>
+                        <div class="compare-row good">
+                            <div class="compare-tag">✅ Con Modo Editor Activado</div>
+                            <div class="compare-desc">Códec universal <strong>H.264 (AVC)</strong> + Audio <strong>AAC Estéreo</strong> ➔ <span style="color:#6ee7b7;">100% Fluido, arrastrar y soltar directo a la línea de tiempo.</span></div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>¿Cuándo activarlo?</strong> Siempre que vayas a montar, recortar o agregar efectos al video en tu programa de edición.</li>
+                        <li><strong>¿Cuándo dejarlo apagado?</strong> Si solo quieres ver el video en tu reproductor o guardarlo como respaldo en tu computadora.</li>
+                    </ul>
+                `
+            },
+            clip_trimmer: {
+                icon: '✂️',
+                title: 'Recorte de Fragmentos (Clip Trimmer)',
+                category: 'Ahorro de Tiempo y Espacio',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Para qué sirve?</strong> Descarga únicamente el minuto o fragmento exacto que necesitas sin tener que bajar horas de video entero.
+                    </div>
+
+                    <div class="info-visual-clip">
+                        <div class="clip-bar-track">
+                            <div class="clip-bar-segment skipped">00:00 (Omitido)</div>
+                            <div class="clip-bar-segment active">✂️ TU FRAGMENTO DESCARGADO ✂️</div>
+                            <div class="clip-bar-segment skipped">Fin (Omitido)</div>
+                        </div>
+                        <div class="clip-time-labels">
+                            <span>Inicio: <strong>01:15</strong></span>
+                            <span>Fin: <strong>02:30</strong></span>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>Ahorro masivo:</strong> Si un podcast dura 2 horas y solo necesitas 1 minuto, no descargas 3 GB innecesarios.</li>
+                        <li><strong>Formatos aceptados:</strong> Minutos y segundos (ej: <code>01:15</code>) o incluyendo horas (ej: <code>01:10:00</code>).</li>
+                    </ul>
+                `
+            },
+            sponsorblock: {
+                icon: '⏭️',
+                title: 'SponsorBlock (Música y Video Limpios)',
+                category: 'Filtro Inteligente de Contenido',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Qué hace?</strong> Elimina de forma inteligente introducciones habladas, saludos de YouTuber, silencios y patrocinios.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="diagram-step warning">
+                            <span class="step-badge warn">Antes:</span>
+                            <p>[Intro con diálogos 0:45s] ➔ <strong>[CANCION REAL]</strong> ➔ [Outro pidiendo likes]</p>
+                        </div>
+                        <div class="diagram-step success">
+                            <span class="step-badge ok">Después:</span>
+                            <p>El descargador corta las orillas y te entrega <strong>solo la música pura</strong> para tu reproductor.</p>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>¿Cómo sabe qué cortar?</strong> Se conecta a la base comunitaria global de SponsorBlock donde miles de usuarios marcan las marcas de tiempo exactas.</li>
+                        <li><strong>En Música:</strong> Ideal para videoclips musicales que comienzan con una escena de película o diálogos que arruinan la canción en tu auto o audífonos.</li>
+                    </ul>
+                `
+            },
+            split_chapters: {
+                icon: '📑',
+                title: 'Dividir en Archivos por Capítulos',
+                category: 'Organización Automática de Videos',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>¿Qué hace?</strong> Si el video tiene capítulos marcados en su descripción, crea un archivo de video independiente y ordenado para cada capítulo dentro de una subcarpeta.
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="diagram-folder-preview">
+                            <div class="folder-row">📁 Carpeta del Álbum / Curso</div>
+                            <div class="file-row">🎬 01 - Introducción al Tema.mp4</div>
+                            <div class="file-row">🎬 02 - Conceptos Clave.mp4</div>
+                            <div class="file-row">🎬 03 - Conclusiones Finales.mp4</div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>Ideal para:</strong> Cursos completos, álbumes de música subidos en un solo video largo, podcasts con múltiples bloques y conferencias.</li>
+                    </ul>
+                `
+            },
+            subtitles_info: {
+                icon: '💬',
+                title: 'Subtítulos Incrustados vs Transcripción en Texto',
+                category: 'Subtítulos y Textos',
+                html: `
+                    <div class="info-lead-box">
+                        <strong>Dos formas distintas de aprovechar los textos según tu objetivo:</strong>
+                    </div>
+
+                    <div class="info-diagram-card">
+                        <div class="compare-row">
+                            <div class="compare-tag blue">1. Incrustados en el Video (Soft Subtitles)</div>
+                            <div class="compare-desc">
+                                Se guardan dentro del archivo MP4. En tu reproductor (VLC, Windows Películas y TV) los puedes <strong>activar, cambiar de idioma o apagar</strong> con el botón <code>[CC]</code>. No tapan la imagen permanentemente.
+                            </div>
+                        </div>
+                        <div class="compare-row purple">
+                            <div class="compare-tag purple">2. Descarga en Texto (Transcripción)</div>
+                            <div class="compare-desc">
+                                Te descarga un archivo de texto editable (<code>.SRT</code>, <code>.VTT</code> o <code>.TXT</code>). <strong>Perfecto para redactar resúmenes, estudiar el guion, traducir o importar a Premiere Pro</strong>.
+                            </div>
+                        </div>
+                    </div>
+
+                    <ul class="info-bullet-list">
+                        <li><strong>Creador vs Automático:</strong> Los subtítulos del creador fueron escritos por un humano (100% precisos). Los automáticos son generados por la IA de YouTube (útiles cuando el creador no subió subtítulos).</li>
+                    </ul>
+                `
+            }
+        };
+
+        function openInfoHelp(key) {
+            const data = infoKnowledgeBase[key];
+            if (!data) return;
+            infoHelp.icon.textContent = data.icon || '💡';
+            infoHelp.title.textContent = data.title || 'Información';
+            infoHelp.category.textContent = data.category || 'Guía Rápida';
+            infoHelp.body.innerHTML = data.html || '';
+            infoHelp.modal.classList.remove('hidden');
+        }
+
+        function closeInfoHelp() {
+            infoHelp.modal.classList.add('hidden');
+        }
+
+        if (infoHelp.closeBtn) infoHelp.closeBtn.addEventListener('click', closeInfoHelp);
+        if (infoHelp.understoodBtn) infoHelp.understoodBtn.addEventListener('click', closeInfoHelp);
+        if (infoHelp.modal) {
+            infoHelp.modal.addEventListener('click', (e) => {
+                if (e.target === infoHelp.modal) closeInfoHelp();
+            });
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if (infoHelp.modal && !infoHelp.modal.classList.contains('hidden')) closeInfoHelp();
+                if (fbModal.modal && !fbModal.modal.classList.contains('hidden')) closeFeedbackModal();
+            }
+        });
+
+        // Delegate click for all info buttons ([data-info])
+        document.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-info]');
+            if (btn && btn.dataset.info) {
+                e.preventDefault();
+                e.stopPropagation();
+                openInfoHelp(btn.dataset.info);
+            }
+        });
 
         async function checkSystemStatus() {
             try {
@@ -2158,44 +2857,56 @@
                 const data = await res.json();
                 if (!data.success) return;
 
-                sys.versionText.textContent = `yt-dlp v${data.installed_version}`;
+                const appVer = data.app_version || data.portable_version || '2.0.0';
+
+                // Display installed yt-dlp version
                 sys.pcVersion.textContent = `v${data.installed_version}`;
 
-                if (data.has_portable) {
-                    sys.portableVersion.textContent = `v${data.portable_version || data.installed_version}`;
-                    sys.portableSub.textContent = 'Carpeta Portable sincronizada';
-                } else {
-                    sys.portableVersion.textContent = 'No creada';
-                    sys.portableSub.textContent = 'Solo instalación local';
-                }
+                // Display Portable Downloader App Version in the middle card
+                sys.portableVersion.textContent = `v${appVer}`;
+                sys.portableSub.textContent = `Descargador v${appVer}`;
 
+                // Display Latest yt-dlp on PyPI
                 sys.latestVersion.textContent = `v${data.latest_version}`;
 
-                if (data.update_available) {
-                    sys.statusDot.className = 'status-dot warning';
-                    sys.updateAlertBadge.classList.remove('hidden');
-                    sys.updateBadge.textContent = '¡Nueva versión!';
-                    sys.updateBadge.className = 'v-sub text-warning';
-                } else {
-                    sys.statusDot.className = 'status-dot online';
-                    sys.updateAlertBadge.classList.add('hidden');
-                    sys.updateBadge.textContent = 'Al día';
-                    sys.updateBadge.className = 'v-sub text-success';
-                }
+                let updateFound = Boolean(data.update_available);
 
-                // Consultar actualización remota de la App en GitHub (OTA)
+                // Check remote GitHub OTA app update
                 try {
                     const appRes = await fetch('/api/system/check-app-update');
                     const appData = await appRes.json();
                     if (appData && appData.update_available) {
-                        sys.statusDot.className = 'status-dot warning';
-                        sys.updateAlertBadge.classList.remove('hidden');
-                        sys.versionText.textContent = `yt-dlp v${data.installed_version} • ¡App v${appData.latest_version} disponible!`;
-                        sys.updateBadge.textContent = `¡App v${appData.latest_version}!`;
-                        sys.updateBadge.className = 'v-sub text-warning';
+                        updateFound = true;
+                        sys.portableSub.innerHTML = `Descargador v${appVer} • <span class="text-danger">¡v${appData.latest_version} en GitHub!</span>`;
                     }
                 } catch(appErr) {
-                    // Ignore background check failure
+                    // Ignore background network glitch
+                }
+
+                if (updateFound) {
+                    // 🔴 Turn the yt-dlp header button RED to alert the user
+                    sys.statusBtn.classList.add('has-update-red');
+                    sys.statusDot.className = 'status-dot danger';
+                    sys.updateAlertBadge.classList.remove('hidden');
+                    sys.updateAlertBadge.className = 'update-badge danger';
+                    sys.updateAlertBadge.textContent = '🔴 ¡Actualización!';
+                    sys.versionText.textContent = `yt-dlp v${data.installed_version} • ¡Actualizar!`;
+
+                    // Inside modal
+                    sys.updateBadge.textContent = '¡Nueva versión!';
+                    sys.updateBadge.className = 'v-sub text-danger';
+                    if (sys.runUpdateBtn) sys.runUpdateBtn.classList.add('btn-pulse-alert');
+                } else {
+                    // Normal state: green online
+                    sys.statusBtn.classList.remove('has-update-red');
+                    sys.statusDot.className = 'status-dot online';
+                    sys.updateAlertBadge.classList.add('hidden');
+                    sys.versionText.textContent = `yt-dlp v${data.installed_version}`;
+
+                    // Inside modal
+                    sys.updateBadge.textContent = 'Al día';
+                    sys.updateBadge.className = 'v-sub text-success';
+                    if (sys.runUpdateBtn) sys.runUpdateBtn.classList.remove('btn-pulse-alert');
                 }
             } catch(e) {
                 sys.versionText.textContent = 'yt-dlp activo';
@@ -2243,13 +2954,48 @@
                         sys.updateConsole.appendChild(line);
                         sys.updateConsole.scrollTop = sys.updateConsole.scrollHeight;
                     } else if (p.status === 'complete') {
-                        sys.updateStatusText.textContent = '¡Actualizado con éxito!';
-                        sys.runUpdateBtn.disabled = false;
+                        sys.updateStatusText.textContent = '¡Actualizado! Recargando motor en memoria...';
                         showToast(p.message || 'yt-dlp actualizado con éxito.', 'success');
                         hideDiagnostic();
-                        checkSystemStatus();
-                        currentUpdateEventSource.close();
-                        currentUpdateEventSource = null;
+                        if (currentUpdateEventSource) {
+                            currentUpdateEventSource.close();
+                            currentUpdateEventSource = null;
+                        }
+
+                        // Wait 1.5s then trigger clean decoupled process restart to refresh sys.modules in RAM
+                        setTimeout(async () => {
+                            try {
+                                await fetch('/api/system/restart', {method: 'POST'});
+                            } catch(reErr) { /* server restarts */ }
+
+                            // Polling con espera inicial de 2.5s y hasta 6 reintentos cada 1s para asegurar el bind al puerto 5000
+                            setTimeout(async () => {
+                                let attempts = 0;
+                                const maxAttempts = 6;
+                                const pollInterval = setInterval(async () => {
+                                    attempts++;
+                                    try {
+                                        const res = await fetch('/api/system/status');
+                                        if (res.ok) {
+                                            clearInterval(pollInterval);
+                                            await checkSystemStatus();
+                                            showToast('Motor recargado en memoria correctamente.', 'success');
+                                            sys.updateStatusText.textContent = '¡Motor y dependencias al día!';
+                                            sys.runUpdateBtn.disabled = false;
+                                            return;
+                                        }
+                                    } catch(pollErr) {
+                                        // Sigue esperando a que el puerto 5000 esté disponible
+                                    }
+                                    if (attempts >= maxAttempts) {
+                                        clearInterval(pollInterval);
+                                        checkSystemStatus().catch(() => {});
+                                        sys.updateStatusText.textContent = '¡Motor y dependencias al día!';
+                                        sys.runUpdateBtn.disabled = false;
+                                    }
+                                }, 1000);
+                            }, 2500);
+                        }, 1500);
                     } else if (p.status === 'error') {
                         sys.updateStatusText.textContent = 'Error en actualización';
                         sys.runUpdateBtn.disabled = false;
@@ -2294,6 +3040,319 @@
         // Initialize system status check
         checkSystemStatus();
         setInterval(checkSystemStatus, 300000); // Check every 5 minutes
+
+        // ═════════════════════════════════════════════════════════════════════════
+        //  QUEUE MANAGER & SQLITE HISTORY CONTROLLER
+        // ═════════════════════════════════════════════════════════════════════════
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        const queueUI = {
+            badge:             document.getElementById('queueActiveBadge'),
+            countActive:       document.getElementById('queueCountActive'),
+            countPending:      document.getElementById('queueCountPending'),
+            countHistory:      document.getElementById('queueCountHistory'),
+            cardsContainer:    document.getElementById('queueCardsContainer'),
+            emptyNotice:       document.getElementById('queueEmptyNotice'),
+            workerButtons:     document.querySelectorAll('.btn-worker'),
+            historyTableBody:  document.getElementById('historyTableBody'),
+            historyTableEmpty: document.getElementById('historyTableEmpty'),
+            historySearch:     document.getElementById('historySearchInput'),
+            filterPills:       document.querySelectorAll('.history-filter-pill'),
+            refreshBtn:        document.getElementById('historyRefreshBtn'),
+            clearBtn:          document.getElementById('historyClearBtn'),
+        };
+
+        let rawHistoryData = [];
+        let currentHistoryFilter = 'all';
+
+        // 1. Selector visual de descargas simultáneas (1 a 5)
+        queueUI.workerButtons.forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const count = parseInt(btn.dataset.workers);
+                try {
+                    const res = await fetch('/api/queue/config', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ max_workers: count })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        queueUI.workerButtons.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        showToast(`Límite ajustado a ${count} descargas simultáneas.`, 'success');
+                        fetchQueueStatus();
+                    }
+                } catch(err) {
+                    showToast('No se pudo ajustar la concurrencia: ' + err.message, 'error');
+                }
+            });
+        });
+
+        // 2. Consulta y actualización de estado de la cola
+        async function fetchQueueStatus() {
+            try {
+                const res = await fetch('/api/queue/status');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.success) return;
+
+                // Sincronizar botón activo
+                if (data.max_workers) {
+                    queueUI.workerButtons.forEach(b => {
+                        b.classList.toggle('active', parseInt(b.dataset.workers) === data.max_workers);
+                    });
+                }
+
+                // Contadores y badge
+                const activeCount = data.active_count || 0;
+                const pendingCount = data.pending_count || 0;
+                queueUI.countActive.textContent = activeCount;
+                queueUI.countPending.textContent = pendingCount;
+
+                const totalLive = activeCount + pendingCount;
+                if (totalLive > 0) {
+                    queueUI.badge.textContent = totalLive;
+                    queueUI.badge.classList.remove('hidden');
+                } else {
+                    queueUI.badge.classList.add('hidden');
+                }
+
+                renderQueueCards(data.queue || []);
+            } catch(e) {
+                // Silencioso en caso de reconexión
+            }
+        }
+
+        // Renderizado de tarjetas de descargas activas y en espera
+        function renderQueueCards(items) {
+            const visibleItems = items.filter(it => ['pending', 'downloading'].includes(it.status));
+
+            if (visibleItems.length === 0) {
+                queueUI.cardsContainer.innerHTML = '';
+                queueUI.emptyNotice.classList.remove('hidden');
+                return;
+            }
+
+            queueUI.emptyNotice.classList.add('hidden');
+            queueUI.cardsContainer.innerHTML = visibleItems.map(it => {
+                const isMusic = it.type === 'music';
+                const typeIcon = isMusic ? '🎵' : '🎬';
+                const typeLabel = isMusic ? 'Música MP3' : (it.type === 'audio_only' ? 'Audio M4A' : 'Vídeo MP4');
+
+                let statusBadgeClass = 'badge-pending';
+                let statusText = 'En cola de espera';
+                if (it.status === 'downloading') {
+                    statusBadgeClass = 'badge-downloading pulsing';
+                    statusText = 'Descargando...';
+                }
+
+                const progress = (it.progress || 0).toFixed(1);
+
+                return `
+                    <div class="queue-card card-status-${it.status}" id="qcard-${it.task_id}">
+                        <div class="queue-card-top">
+                            <div class="queue-card-identity">
+                                <span class="queue-type-chip ${isMusic ? 'chip-music' : 'chip-video'}">
+                                    ${typeIcon} ${typeLabel}
+                                </span>
+                                <h4 class="queue-card-title" title="${escapeHtml(it.title)}">${escapeHtml(it.title)}</h4>
+                            </div>
+                            <div class="queue-card-actions">
+                                <span class="queue-status-pill ${statusBadgeClass}">${statusText}</span>
+                                <button type="button" class="btn-cancel-task" onclick="cancelQueueTask('${it.task_id}')" title="Cancelar descarga">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                                    <span>Cancelar</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="queue-progress-wrapper">
+                            <div class="queue-progress-bar-bg">
+                                <div class="queue-progress-bar-fill ${it.status === 'pending' ? 'bar-pending-pulse' : ''}" style="width: ${it.status === 'pending' ? '100%' : progress + '%'}"></div>
+                            </div>
+                        </div>
+
+                        <div class="queue-card-stats-row">
+                            <span class="queue-stat-item">
+                                ${it.status === 'downloading' ? `⚡ ${it.speed || 'Calculando...'}` : '⏳ Esperando trabajador disponible'}
+                            </span>
+                            <span class="queue-stat-item">
+                                ${it.status === 'downloading' && it.eta ? `⏱️ ETA: ${it.eta}` : ''}
+                            </span>
+                            <span class="queue-stat-item stat-right">
+                                ${it.status === 'downloading' ? `${progress}% (${it.downloaded || '0 MB'} / ${it.total || '?'})` : ''}
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Cancelar tarea desde la UI
+        window.cancelQueueTask = async function(taskId) {
+            try {
+                const res = await fetch(`/api/queue/cancel/${taskId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message || 'Descarga cancelada.', 'info');
+                    fetchQueueStatus();
+                    loadHistory();
+                } else {
+                    showToast(data.message || 'No se pudo cancelar.', 'error');
+                }
+            } catch(e) {
+                showToast('Error cancelando tarea: ' + e.message, 'error');
+            }
+        };
+
+        // 3. Historial permanente desde SQLite
+        async function loadHistory() {
+            try {
+                const res = await fetch('/api/history');
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.success) return;
+
+                rawHistoryData = data.history || [];
+                queueUI.countHistory.textContent = rawHistoryData.length;
+                renderHistoryTable();
+            } catch(e) {
+                console.error('Error cargando historial:', e);
+            }
+        }
+
+        function renderHistoryTable() {
+            const query = (queueUI.historySearch.value || '').trim().toLowerCase();
+            const filtered = rawHistoryData.filter(item => {
+                if (currentHistoryFilter === 'music' && item.type !== 'music') return false;
+                if (currentHistoryFilter === 'video' && item.type === 'music') return false;
+
+                if (!query) return true;
+                const matchTitle = (item.title || '').toLowerCase().includes(query);
+                const matchUrl = (item.url || '').toLowerCase().includes(query);
+                const matchFile = (item.filepath || '').toLowerCase().includes(query);
+                const matchStatus = (item.status || '').toLowerCase().includes(query);
+                return matchTitle || matchUrl || matchFile || matchStatus;
+            });
+
+            if (filtered.length === 0) {
+                queueUI.historyTableBody.innerHTML = '';
+                queueUI.historyTableEmpty.classList.remove('hidden');
+                return;
+            }
+
+            queueUI.historyTableEmpty.classList.add('hidden');
+            queueUI.historyTableBody.innerHTML = filtered.map(row => {
+                const isMusic = row.type === 'music';
+                const typeBadge = isMusic
+                    ? '<span class="history-chip chip-music">🎵 Música</span>'
+                    : '<span class="history-chip chip-video">🎬 Vídeo</span>';
+
+                let statusBadge = '<span class="history-status-badge status-completed">✓ Completado</span>';
+                if (row.status === 'failed') {
+                    statusBadge = '<span class="history-status-badge status-failed">✗ Fallido</span>';
+                } else if (row.status === 'cancelled') {
+                    statusBadge = '<span class="history-status-badge status-cancelled">⊘ Cancelado</span>';
+                } else if (row.status === 'downloading' || row.status === 'pending') {
+                    statusBadge = '<span class="history-status-badge status-pending">⏳ En proceso</span>';
+                }
+
+                const filename = row.filepath ? row.filepath.split(/[\\\\/]/).pop() : (row.title || 'Archivo');
+                const folderKey = isMusic ? 'canciones' : 'videos';
+
+                return `
+                    <tr id="hist-row-${row.id}">
+                        <td>${typeBadge}</td>
+                        <td class="history-title-cell">
+                            <strong class="history-title-text" title="${escapeHtml(row.title)}">${escapeHtml(row.title)}</strong>
+                            ${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener" class="history-url-link" title="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a>` : ''}
+                        </td>
+                        <td>${statusBadge}</td>
+                        <td class="history-size-cell">${row.filesize || '-'}</td>
+                        <td class="history-date-cell">${row.timestamp || '-'}</td>
+                        <td class="history-actions-cell text-right">
+                            ${row.filepath && row.status === 'completed' ? `
+                                <button type="button" class="btn-table-action btn-open-folder-action" onclick="openFolder('${folderKey}', '${escapeHtml(filename)}')" title="Abrir ubicación en el Explorador">
+                                    📁 Abrir
+                                </button>
+                                <a href="/api/download-file/${folderKey}/${encodeURIComponent(filename)}" download class="btn-table-action btn-download-action" title="Descargar directamente al navegador">
+                                    ⬇ Guardar
+                                </a>
+                            ` : ''}
+                            <button type="button" class="btn-table-action btn-delete-action" onclick="deleteHistoryRow(${row.id})" title="Eliminar del historial">
+                                🗑️
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        window.deleteHistoryRow = async function(id) {
+            try {
+                const res = await fetch(`/api/history/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    rawHistoryData = rawHistoryData.filter(r => r.id !== id);
+                    queueUI.countHistory.textContent = rawHistoryData.length;
+                    renderHistoryTable();
+                    showToast('Registro eliminado del historial.', 'info');
+                } else {
+                    showToast('No se pudo eliminar el registro.', 'error');
+                }
+            } catch(e) {
+                showToast('Error al eliminar: ' + e.message, 'error');
+            }
+        };
+
+        // Vaciar todo el historial
+        queueUI.clearBtn.addEventListener('click', async () => {
+            if (!confirm('¿Estás seguro de que deseas vaciar todo el historial de descargas? Los archivos en disco no serán borrados.')) return;
+            try {
+                const res = await fetch('/api/history/clear', { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    rawHistoryData = [];
+                    queueUI.countHistory.textContent = 0;
+                    renderHistoryTable();
+                    showToast('Historial vaciado correctamente.', 'success');
+                }
+            } catch(e) {
+                showToast('Error al vaciar historial: ' + e.message, 'error');
+            }
+        });
+
+        queueUI.refreshBtn.addEventListener('click', () => {
+            loadHistory();
+            fetchQueueStatus();
+            showToast('Historial y colas actualizados.', 'success');
+        });
+
+        queueUI.historySearch.addEventListener('input', () => {
+            renderHistoryTable();
+        });
+
+        queueUI.filterPills.forEach(pill => {
+            pill.addEventListener('click', () => {
+                queueUI.filterPills.forEach(p => p.classList.remove('active'));
+                pill.classList.add('active');
+                currentHistoryFilter = pill.dataset.filter;
+                renderHistoryTable();
+            });
+        });
+
+        // Sondeo periódico e inicio
+        fetchQueueStatus();
+        loadHistory();
+        setInterval(fetchQueueStatus, 2000);
 
         // ═════════════════════════════════════════════════════════════════════════
         //  SHUTDOWN

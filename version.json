@@ -1,4 +1,4 @@
 {
-  "version": "2.0.0",
-  "changelog": "Actualización 2.0: Soporte multiplataforma, recorte de clips, modo editores y mejoras de estabilidad."
+  "version": "2.0.1",
+  "changelog": "Arreglo 2.0.1: descarga de transcripciones (subtitulos) mas robusta: soporta subtitulos HLS, reintenta ante errores 429 de YouTube y genera texto limpio."
 }

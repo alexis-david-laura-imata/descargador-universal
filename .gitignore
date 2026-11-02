@@ -1,0 +1,4 @@
+bug_webhook.txt
+__pycache__/
+*.pyc
+history.db
