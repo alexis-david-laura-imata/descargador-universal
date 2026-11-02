@@ -1847,6 +1847,7 @@
                 const data = await res.json();
                 if (data.success) {
                     showToast(`Transcripcion guardada: ${data.filename}`, 'success');
+                    if (data.note) showToast(data.note, 'success');
                     if (data.download_url) {
                         const a = document.createElement('a');
                         a.href = data.download_url;

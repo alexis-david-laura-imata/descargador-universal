@@ -1,4 +1,4 @@
 {
-  "version": "2.0.1",
-  "changelog": "Arreglo 2.0.1: descarga de transcripciones (subtitulos) mas robusta: soporta subtitulos HLS, reintenta ante errores 429 de YouTube y genera texto limpio."
+  "version": "2.0.2",
+  "changelog": "Arreglo 2.0.2: las transcripciones auto-traducidas ya no fallan cuando YouTube bloquea (429): se descarga el idioma original y se traduce automaticamente."
 }

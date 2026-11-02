@@ -75,7 +75,7 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 # App Version, OTA Remote Updates & Bug Reporting
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/alexis-david-laura-imata/descargador-universal/main"
 def _load_bug_report_webhook() -> str:
     """Webhook de Discord para reportes: variable de entorno o archivo local bug_webhook.txt (no se sube a GitHub)."""
@@ -2126,11 +2126,13 @@ class _SubtitleLogger:
         self.messages.append(str(msg))
 
 
-def _download_transcript(clean_url, lang, sub_type, cookies_from_browser):
-    """Descarga el subtitulo con yt-dlp (soporta HLS y reintenta ante 429) y lo devuelve como (titulo, texto)."""
-    last_logger = None
+class SubtitleRateLimited(RuntimeError):
+    """YouTube respondio HTTP 429 al pedir el subtitulo."""
+
+
+def _fetch_track(clean_url, lang, sub_type, cookies_from_browser, attempts=3):
+    """Descarga una pista de subtitulos con yt-dlp (soporta HLS y reintenta ante 429) y devuelve (titulo, texto)."""
     rate_limited = False
-    attempts = 3
     use_cookies = bool(cookies_from_browser)
 
     for attempt in range(attempts):
@@ -2162,7 +2164,6 @@ def _download_transcript(clean_url, lang, sub_type, cookies_from_browser):
                 if '429' not in str(e):
                     raise
                 rate_limited = True
-                logger.messages.append(str(e))
                 if attempt < attempts - 1:
                     time.sleep(3 * (attempt + 1))
                 continue
@@ -2186,18 +2187,133 @@ def _download_transcript(clean_url, lang, sub_type, cookies_from_browser):
                 if text.strip():
                     return title, text
 
-            last_logger = logger
+            rate_limited = rate_limited or any('429' in m for m in logger.messages)
 
         if attempt < attempts - 1:
             time.sleep(3 * (attempt + 1))
 
-    if rate_limited or (last_logger and any('429' in m for m in last_logger.messages)):
+    if rate_limited:
+        raise SubtitleRateLimited('YouTube limito temporalmente la descarga de este subtitulo (HTTP 429).')
+    raise RuntimeError('No se pudo descargar el subtitulo. Reintenta en unos minutos o prueba con otro idioma.')
+
+
+def _find_original_auto_lang(clean_url, cookies_from_browser):
+    """Devuelve el idioma original de los subtitulos automaticos (la pista sin 'tlang=' en su URL)."""
+    ydl_opts = {**YDL_COMMON, 'quiet': True, 'no_warnings': True, 'skip_download': True, 'playlist_items': '1'}
+    apply_browser_cookies(ydl_opts, cookies_from_browser)
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(clean_url, download=False)
+    except Exception:
+        if 'cookiesfrombrowser' not in ydl_opts:
+            raise
+        ydl_opts.pop('cookiesfrombrowser', None)
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(clean_url, download=False)
+    if info.get('entries'):
+        info = next((e for e in info['entries'] if e), info)
+
+    auto = info.get('automatic_captions') or {}
+    for code, formats in auto.items():
+        if any(f.get('url') and 'tlang=' not in f['url'] for f in formats):
+            return code
+    return None
+
+
+def _translate_target_code(lang: str) -> str:
+    """Convierte un codigo de idioma de YouTube (es-419, zh-Hans...) al que entiende el traductor."""
+    special = {'zh-hans': 'zh-CN', 'zh-hant': 'zh-TW', 'zh-cn': 'zh-CN', 'zh-tw': 'zh-TW', 'zh-hk': 'zh-TW'}
+    return special.get(lang.lower(), lang.split('-')[0])
+
+
+def _translate_text(text: str, target_lang: str) -> str:
+    """Traduce texto plano linea por linea con el traductor web de Google (sin clave de API)."""
+    target = _translate_target_code(target_lang)
+    # Unir los renglones cortos de los subtitulos en frases para que la traduccion tenga contexto
+    lines, current = [], ''
+    for raw in text.split('\n'):
+        current = f'{current} {raw.strip()}'.strip()
+        if len(current) > 400 or (len(current) >= 40 and re.search(r'[.?!…。]["\')\]]?$', current)):
+            lines.append(current)
+            current = ''
+    if current:
+        lines.append(current)
+    out = []
+    batch, batch_len = [], 0
+
+    def flush():
+        if not batch:
+            return
+        data = [('q', l) for l in batch]
+        result = None
+        for url, params in (
+            ('https://clients5.google.com/translate_a/t', {'client': 'dict-chrome-ex', 'sl': 'auto', 'tl': target}),
+            ('https://translate.googleapis.com/translate_a/t', {'client': 'gtx', 'sl': 'auto', 'tl': target, 'dt': 't'}),
+        ):
+            try:
+                resp = requests.post(url, params=params, data=data, headers=REQUEST_HEADERS, timeout=30)
+                if resp.status_code == 200:
+                    parsed = resp.json()
+                    if len(batch) == 1 and parsed and isinstance(parsed[0], str):
+                        parsed = [parsed]
+                    if len(parsed) == len(batch):
+                        result = [p[0] if isinstance(p, list) else p for p in parsed]
+                        break
+            except (requests.RequestException, ValueError):
+                continue
+        if result is None:
+            raise RuntimeError('No se pudo traducir el texto.')
+        out.extend(result)
+        batch.clear()
+
+    for line in lines:
+        if batch and (len(batch) >= 80 or batch_len + len(line) > 3500):
+            flush()
+            batch_len = 0
+        batch.append(line)
+        batch_len += len(line)
+    flush()
+    return '\n'.join(out)
+
+
+def _download_transcript(clean_url, lang, sub_type, cookies_from_browser):
+    """Devuelve (titulo, texto, idioma_guardado, nota). Si YouTube bloquea (429) un subtitulo
+    auto-traducido, descarga el idioma original y lo traduce; si tampoco se puede traducir,
+    entrega la transcripcion en el idioma original."""
+    try:
+        title, text = _fetch_track(clean_url, lang, sub_type, cookies_from_browser,
+                                   attempts=1 if sub_type != 'manual' else 3)
+        return title, text, lang, ''
+    except SubtitleRateLimited:
+        if sub_type == 'manual':
+            raise RuntimeError('YouTube limito temporalmente la descarga (HTTP 429). Espera uno o dos minutos y reintenta.')
+
+    original = _find_original_auto_lang(clean_url, cookies_from_browser)
+    if not original or original == lang:
         raise RuntimeError(
             'YouTube limito temporalmente la descarga de este subtitulo (HTTP 429). '
-            'Espera uno o dos minutos y reintenta, o elige el idioma original del video '
-            '(los subtitulos traducidos automaticamente son los mas afectados).'
+            'Espera uno o dos minutos y reintenta.'
         )
-    raise RuntimeError('No se pudo descargar el subtitulo. Reintenta en unos minutos o prueba con otro idioma.')
+    try:
+        title, text = _fetch_track(clean_url, original, 'auto', cookies_from_browser)
+    except SubtitleRateLimited:
+        raise RuntimeError(
+            'YouTube limito temporalmente la descarga de subtitulos (HTTP 429). '
+            'Espera uno o dos minutos y reintenta.'
+        )
+
+    original_code = original[:-5] if original.endswith('-orig') else original
+    original_name = get_lang_name(original_code)
+    try:
+        translated = _translate_text(text, lang)
+    except Exception:
+        return title, text, original_code, (
+            f'YouTube bloqueo el subtitulo traducido, asi que se guardo la transcripcion en el idioma '
+            f'original ({original_name}).'
+        )
+    return title, translated, lang, (
+        f'YouTube bloqueo el subtitulo traducido: se descargo el original ({original_name}) y se tradujo automaticamente.'
+    )
 
 
 @app.route('/api/video/subtitles', methods=['POST'])
@@ -2215,11 +2331,11 @@ def video_subtitles():
     try:
         clean_url = normalize_media_url(url)
         try:
-            title, plain_text = _download_transcript(clean_url, lang, sub_type, cookies_from_browser)
+            title, plain_text, saved_lang, note = _download_transcript(clean_url, lang, sub_type, cookies_from_browser)
         except (ValueError, RuntimeError) as e:
             return jsonify({'success': False, 'error': str(e)})
 
-        filename = f'{title}_subtitulos_{lang}.txt'
+        filename = f'{title}_subtitulos_{saved_lang}.txt'
         filepath = os.path.join(SUBTITULOS_DIR, filename)
 
         with open(filepath, 'w', encoding='utf-8') as f:
@@ -2232,6 +2348,7 @@ def video_subtitles():
             'download_url': f'/api/download-file/subtitulos/{filename}',
             'preview': plain_text[:3000],
             'total_length': len(plain_text),
+            'note': note,
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
