@@ -1,4 +1,7 @@
 bug_webhook.txt
+config.json
+_backup/
 __pycache__/
 *.pyc
 history.db
+*.ota_new

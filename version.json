@@ -1,4 +1,9 @@
 {
-  "version": "2.0.2",
-  "changelog": "Arreglo 2.0.2: las transcripciones auto-traducidas ya no fallan cuando YouTube bloquea (429): se descarga el idioma original y se traduce automaticamente."
+  "version": "2.1.0",
+  "changelog": "Actualización 2.1.0: auto-actualización segura de yt-dlp (en caliente) y de la app, autorreparación ante cambios de YouTube, transcripciones traducidas sin errores y correcciones de seguridad y estabilidad.",
+  "files": {
+    "app.py": "16ff9a10aebc6f6517335bcffcc31283ca24004f252e638ea1c29f9594941a59",
+    "templates/index.html": "31c33d4eb7a237eb48050a8bc116cb1aa76ad6aec3bf8fbcafc91cc4514b8a57",
+    "static/style.css": "fc3e5df966c37209272c246187ef299b6c1985db70ae5fdf9a510641fb619b9d"
+  }
 }

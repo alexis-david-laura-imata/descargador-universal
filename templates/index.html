@@ -1079,10 +1079,12 @@
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             toast.className = `toast toast-${type}`;
-            toast.innerHTML = `
-                <div class="toast-icon"></div>
-                <div class="toast-content">${message}</div>
-            `;
+            const toastIcon = document.createElement('div');
+            toastIcon.className = 'toast-icon';
+            const toastContent = document.createElement('div');
+            toastContent.className = 'toast-content';
+            toastContent.textContent = String(message ?? '');
+            toast.append(toastIcon, toastContent);
             container.appendChild(toast);
             void toast.offsetWidth;
             toast.classList.add('show');
@@ -1331,8 +1333,8 @@
             item.innerHTML = `
                 <img src="${m.thumbPreview.src}" alt="" class="history-thumb">
                 <div class="history-info">
-                    <div class="history-title">${m.titleInput.value}</div>
-                    <div class="history-artist">${m.artistInput.value}</div>
+                    <div class="history-title">${escapeHtml(m.titleInput.value)}</div>
+                    <div class="history-artist">${escapeHtml(m.artistInput.value)}</div>
                 </div>
                 <div class="history-badge">MP3</div>
                 <div class="history-status">
@@ -1925,11 +1927,11 @@
                 const badgeLabel = s.type === 'manual' ? 'Creador' : 'Auto (IA)';
 
                 row.innerHTML = `
-                    <input type="checkbox" value="${s.code}" data-type="${s.type}" class="sub-checkbox" ${shouldCheck ? 'checked' : ''}>
+                    <input type="checkbox" value="${escapeHtml(s.code)}" data-type="${escapeHtml(s.type)}" class="sub-checkbox" ${shouldCheck ? 'checked' : ''}>
                     <span class="sub-item-content">
-                        <span class="sub-item-name">${s.name}</span>
+                        <span class="sub-item-name">${escapeHtml(s.name)}</span>
                         <span class="sub-badge ${badgeClass}">${badgeLabel}</span>
-                        <span class="sub-item-code">${s.code}</span>
+                        <span class="sub-item-code">${escapeHtml(s.code)}</span>
                     </span>
                 `;
 
@@ -2331,8 +2333,8 @@
             item.innerHTML = `
                 <img src="${v.thumbPreview.src}" alt="" class="history-thumb history-thumb-video">
                 <div class="history-info">
-                    <div class="history-title">${videoData.title}</div>
-                    <div class="history-artist">${videoData.channel}</div>
+                    <div class="history-title">${escapeHtml(videoData.title)}</div>
+                    <div class="history-artist">${escapeHtml(videoData.channel)}</div>
                 </div>
                 <div class="history-badge">${badge}</div>
                 <div class="history-status">
@@ -2852,9 +2854,9 @@
             }
         });
 
-        async function checkSystemStatus() {
+        async function checkSystemStatus(force = false) {
             try {
-                const res = await fetch('/api/system/status');
+                const res = await fetch('/api/system/status' + (force ? '?force=1' : ''));
                 const data = await res.json();
                 if (!data.success) return;
 
@@ -2878,7 +2880,12 @@
                     const appData = await appRes.json();
                     if (appData && appData.update_available) {
                         updateFound = true;
-                        sys.portableSub.innerHTML = `Descargador v${appVer} • <span class="text-danger">¡v${appData.latest_version} en GitHub!</span>`;
+                        sys.portableSub.textContent = '';
+                        sys.portableSub.append(`Descargador v${appVer} • `);
+                        const newVerTag = document.createElement('span');
+                        newVerTag.className = 'text-danger';
+                        newVerTag.textContent = `¡v${appData.latest_version} en GitHub!`;
+                        sys.portableSub.appendChild(newVerTag);
                     }
                 } catch(appErr) {
                     // Ignore background network glitch
@@ -2917,7 +2924,7 @@
 
         function openSystemModal() {
             sys.modal.classList.remove('hidden');
-            checkSystemStatus();
+            checkSystemStatus(true);
         }
 
         function closeSystemModal() {
@@ -2955,7 +2962,6 @@
                         sys.updateConsole.appendChild(line);
                         sys.updateConsole.scrollTop = sys.updateConsole.scrollHeight;
                     } else if (p.status === 'complete') {
-                        sys.updateStatusText.textContent = '¡Actualizado! Recargando motor en memoria...';
                         showToast(p.message || 'yt-dlp actualizado con éxito.', 'success');
                         hideDiagnostic();
                         if (currentUpdateEventSource) {
@@ -2963,40 +2969,19 @@
                             currentUpdateEventSource = null;
                         }
 
-                        // Wait 1.5s then trigger clean decoupled process restart to refresh sys.modules in RAM
-                        setTimeout(async () => {
-                            try {
-                                await fetch('/api/system/restart', {method: 'POST'});
-                            } catch(reErr) { /* server restarts */ }
-
-                            // Polling con espera inicial de 2.5s y hasta 6 reintentos cada 1s para asegurar el bind al puerto 5000
+                        if (p.restart_required) {
+                            // Hay código nuevo de la app: reiniciar el servidor y recargar la página cuando vuelva
+                            sys.updateStatusText.textContent = '¡Actualizado! Reiniciando para aplicar la nueva versión...';
                             setTimeout(async () => {
-                                let attempts = 0;
-                                const maxAttempts = 6;
-                                const pollInterval = setInterval(async () => {
-                                    attempts++;
-                                    try {
-                                        const res = await fetch('/api/system/status');
-                                        if (res.ok) {
-                                            clearInterval(pollInterval);
-                                            await checkSystemStatus();
-                                            showToast('Motor recargado en memoria correctamente.', 'success');
-                                            sys.updateStatusText.textContent = '¡Motor y dependencias al día!';
-                                            sys.runUpdateBtn.disabled = false;
-                                            return;
-                                        }
-                                    } catch(pollErr) {
-                                        // Sigue esperando a que el puerto 5000 esté disponible
-                                    }
-                                    if (attempts >= maxAttempts) {
-                                        clearInterval(pollInterval);
-                                        checkSystemStatus().catch(() => {});
-                                        sys.updateStatusText.textContent = '¡Motor y dependencias al día!';
-                                        sys.runUpdateBtn.disabled = false;
-                                    }
-                                }, 1000);
-                            }, 2500);
-                        }, 1500);
+                                try { await fetch('/api/system/restart', {method: 'POST'}); } catch(reErr) { /* el servidor se reinicia */ }
+                                waitForServerRestart();
+                            }, 1200);
+                        } else {
+                            // Solo yt-dlp: el motor ya se recargó en caliente, no hace falta reiniciar
+                            sys.updateStatusText.textContent = '¡Motor y dependencias al día!';
+                            sys.runUpdateBtn.disabled = false;
+                            checkSystemStatus(true).catch(() => {});
+                        }
                     } else if (p.status === 'error') {
                         sys.updateStatusText.textContent = 'Error en actualización';
                         sys.runUpdateBtn.disabled = false;
@@ -3020,6 +3005,43 @@
         }
 
         sys.runUpdateBtn.addEventListener('click', runSystemUpdate);
+
+        // Tras un reinicio del servidor (boot_id distinto) se recarga la página para usar el código nuevo
+        let knownBootId = null;
+        async function fetchBootId() {
+            const res = await fetch('/api/ping', {cache: 'no-store'});
+            const data = await res.json();
+            return data && data.boot_id ? data.boot_id : null;
+        }
+
+        async function waitForServerRestart() {
+            const deadline = Date.now() + 90000;
+            await new Promise(r => setTimeout(r, 2000));
+            while (Date.now() < deadline) {
+                try {
+                    const id = await fetchBootId();
+                    if (id && id !== knownBootId) {
+                        showToast('Programa reiniciado. Recargando...', 'success');
+                        setTimeout(() => location.reload(), 600);
+                        return;
+                    }
+                } catch (e) { /* aún reiniciando */ }
+                await new Promise(r => setTimeout(r, 1000));
+            }
+            sys.updateStatusText.textContent = 'No se pudo confirmar el reinicio. Recarga la página (F5).';
+            sys.runUpdateBtn.disabled = false;
+        }
+
+        (async function watchServerBoot() {
+            try { knownBootId = await fetchBootId(); } catch (e) { /* sin servidor */ }
+            setInterval(async () => {
+                try {
+                    const id = await fetchBootId();
+                    if (id && knownBootId && id !== knownBootId) location.reload();
+                    else if (id && !knownBootId) knownBootId = id;
+                } catch (e) { /* servidor reiniciándose */ }
+            }, 8000);
+        })();
 
         sys.clearCacheBtn.addEventListener('click', async () => {
             sys.clearCacheBtn.disabled = true;
@@ -3274,14 +3296,14 @@
                         <td>${typeBadge}</td>
                         <td class="history-title-cell">
                             <strong class="history-title-text" title="${escapeHtml(row.title)}">${escapeHtml(row.title)}</strong>
-                            ${row.url ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener" class="history-url-link" title="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a>` : ''}
+                            ${row.url && /^https?:\/\//i.test(row.url) ? `<a href="${escapeHtml(row.url)}" target="_blank" rel="noopener noreferrer" class="history-url-link" title="${escapeHtml(row.url)}">${escapeHtml(row.url)}</a>` : ''}
                         </td>
                         <td>${statusBadge}</td>
                         <td class="history-size-cell">${row.filesize || '-'}</td>
                         <td class="history-date-cell">${row.timestamp || '-'}</td>
                         <td class="history-actions-cell text-right">
                             ${row.filepath && row.status === 'completed' ? `
-                                <button type="button" class="btn-table-action btn-open-folder-action" onclick="openFolder('${folderKey}', '${escapeHtml(filename)}')" title="Abrir ubicación en el Explorador">
+                                <button type="button" class="btn-table-action btn-open-folder-action" onclick="openFolder('${folderKey}')" title="Abrir ubicación en el Explorador">
                                     📁 Abrir
                                 </button>
                                 <a href="/api/download-file/${folderKey}/${encodeURIComponent(filename)}" download class="btn-table-action btn-download-action" title="Descargar directamente al navegador">

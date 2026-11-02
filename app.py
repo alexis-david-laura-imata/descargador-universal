@@ -4,6 +4,12 @@ import glob
 import html
 import time
 import tempfile
+import hashlib
+import py_compile
+import socket
+import ipaddress
+import importlib
+import importlib.util
 import sys
 import json
 import uuid
@@ -13,15 +19,29 @@ import queue
 import subprocess
 import shutil
 from datetime import datetime, timezone
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse, quote
 import requests
 import sqlite3
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, render_template, request, jsonify, Response
-from yt_dlp import YoutubeDL
-from yt_dlp.utils import download_range_func
+from yt_dlp import YoutubeDL as _RealYoutubeDL
+from yt_dlp.utils import download_range_func as _real_download_range_func
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TCON, APIC, ID3NoHeaderError
+
+# La consola de Windows usa cp1252: un caracter raro en un mensaje de yt-dlp no debe tumbar el programa
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+BOOT_ID = uuid.uuid4().hex          # cambia en cada arranque: la web lo usa para saber que el servidor se reinicio
+BOOT_TIME = time.time()
+APP_ID = 'descargador-universal'
+DEFAULT_PORT = 5000
+RESTART_EXIT_CODE = 75              # codigo con el que se pide a los .bat que relancen el programa
 
 # ─── Configuration ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -73,10 +93,136 @@ app = Flask(
 )
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024  # las peticiones de la web son JSON pequeños
+
+# ─── Seguridad de la API local ──────────────────────────────────────────────────
+# El servidor solo escucha en 127.0.0.1, pero cualquier pagina web abierta en el navegador puede enviarle
+# peticiones (CSRF) o resolver un dominio suyo a 127.0.0.1 (DNS rebinding). Se aceptan unicamente peticiones
+# cuyo Host sea local y, si traen Origin, que sea esta misma web.
+LOCAL_HOSTNAMES = {'localhost', '127.0.0.1', '[::1]', '::1'}
+_last_user_activity = time.time()
+_PASSIVE_PATHS = ('/api/ping', '/api/system/status', '/api/system/check-app-update', '/api/queue/status')
+
+
+def _host_only(netloc: str) -> str:
+    netloc = (netloc or '').strip().lower()
+    if netloc.startswith('['):
+        return netloc.split(']')[0] + ']'
+    return netloc.rsplit(':', 1)[0] if ':' in netloc else netloc
+
+
+@app.before_request
+def guard_local_requests():
+    global _last_user_activity
+    if _host_only(request.host) not in LOCAL_HOSTNAMES:
+        return jsonify({'success': False, 'error': 'Host no permitido'}), 403
+    origin = request.headers.get('Origin')
+    if origin and origin != 'null':
+        if urlparse(origin).netloc.lower() != request.host.lower():
+            return jsonify({'success': False, 'error': 'Origen no permitido'}), 403
+    elif origin == 'null' and request.method not in ('GET', 'HEAD', 'OPTIONS'):
+        return jsonify({'success': False, 'error': 'Origen no permitido'}), 403
+    if request.method not in ('GET', 'HEAD', 'OPTIONS') and request.headers.get('Sec-Fetch-Site') == 'cross-site':
+        return jsonify({'success': False, 'error': 'Peticion entre sitios bloqueada'}), 403
+    if request.path not in _PASSIVE_PATHS:
+        _last_user_activity = time.time()
+
+
+@app.after_request
+def add_security_headers(resp):
+    resp.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    resp.headers.setdefault('X-Frame-Options', 'DENY')
+    resp.headers.setdefault('Referrer-Policy', 'no-referrer')
+    resp.headers.setdefault('Content-Security-Policy', "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+    if request.path.startswith('/api/') or request.path == '/':
+        resp.headers['Cache-Control'] = 'no-store'
+    return resp
+
+
+def _json_error(status, message):
+    return jsonify({'success': False, 'error': message}), status
+
+
+@app.errorhandler(400)
+def _err_400(e):
+    return _json_error(400, 'Peticion no valida.')
+
+
+@app.errorhandler(404)
+def _err_404(e):
+    return _json_error(404, 'No encontrado.')
+
+
+@app.errorhandler(405)
+def _err_405(e):
+    return _json_error(405, 'Metodo no permitido.')
+
+
+@app.errorhandler(413)
+def _err_413(e):
+    return _json_error(413, 'La peticion es demasiado grande.')
+
+
+@app.errorhandler(Exception)
+def _err_unhandled(e):
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        return _json_error(e.code or 500, e.description)
+    print(f"[ERROR] Excepcion no controlada en {request.path}: {e}")
+    return _json_error(500, strip_ansi(str(e)) or 'Error interno.')
+
+
+def is_public_http_url(url: str) -> bool:
+    """True si la URL es http(s) y apunta a internet (no a localhost ni a la red local)."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return False
+        for info in socket.getaddrinfo(parsed.hostname, None):
+            ip = ipaddress.ip_address(info[4][0].split('%')[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+                return False
+        return True
+    except Exception:
+        return False
+
+
+def safe_fetch(url: str, timeout: int = 15, max_bytes: int = 15 * 1024 * 1024):
+    """GET de una imagen/archivo remoto validando cada redireccion contra destinos internos (SSRF)."""
+    for _ in range(4):
+        if not is_public_http_url(url):
+            raise ValueError('URL no permitida.')
+        resp = requests.get(url, headers=REQUEST_HEADERS, timeout=timeout, allow_redirects=False, stream=True)
+        if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get('Location'):
+            url = requests.compat.urljoin(url, resp.headers['Location'])
+            resp.close()
+            continue
+        data = resp.raw.read(max_bytes + 1, decode_content=True)
+        resp.close()
+        if len(data) > max_bytes:
+            raise ValueError('El archivo es demasiado grande.')
+        resp._content = data
+        return resp
+    raise ValueError('Demasiadas redirecciones.')
+
+
+@app.route('/api/ping')
+def ping():
+    """Identifica esta aplicacion (para detectar otra instancia ya abierta y reinicios del servidor)."""
+    return jsonify({
+        'success': True,
+        'app': APP_ID,
+        'version': APP_VERSION,
+        'boot_id': BOOT_ID,
+        'pid': os.getpid(),
+    })
+
 
 # App Version, OTA Remote Updates & Bug Reporting
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.1.0"
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/alexis-david-laura-imata/descargador-universal/main"
+if os.environ.get("YTDL_OTA_BASE", "").startswith(("http://127.0.0.1", "http://localhost")):
+    GITHUB_RAW_BASE = os.environ["YTDL_OTA_BASE"]  # solo para pruebas locales
 def _load_bug_report_webhook() -> str:
     """Webhook de Discord para reportes: variable de entorno o archivo local bug_webhook.txt (no se sube a GitHub)."""
     env_url = os.environ.get("BUG_REPORT_WEBHOOK", "").strip()
@@ -113,13 +259,127 @@ REQUEST_HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 }
 
+# ─── yt-dlp con recarga en caliente ─────────────────────────────────────────────
+# pip puede actualizar yt-dlp en disco, pero el proceso en marcha sigue con la version vieja cargada en memoria
+# (y los extractores se importan de forma perezosa, asi que incluso se mezclarian versiones). Para que una
+# actualizacion funcione sin reiniciar, todo el codigo usa este envoltorio: cuenta las sesiones activas y,
+# cuando no queda ninguna, descarta los modulos yt_dlp y los vuelve a importar.
+
+_ydl_lock = threading.Lock()
+_ydl_inflight = 0
+_ydl_reload_pending = False
+_ydl_loaded_version = getattr(sys.modules.get('yt_dlp.version'), '__version__', '')
+
+
+class YoutubeDL:
+    """Envoltorio de yt_dlp.YoutubeDL (uso: with YoutubeDL(opts) as ydl) compatible con recarga en caliente."""
+
+    def __init__(self, params=None, *args, **kwargs):
+        self._call = (params, args, kwargs)
+        self._inst = None
+
+    def __enter__(self):
+        global _ydl_inflight
+        with _ydl_lock:
+            _ydl_inflight += 1
+            real = _RealYoutubeDL
+        try:
+            params, args, kwargs = self._call
+            self._inst = real(params, *args, **kwargs)
+            return self._inst.__enter__()
+        except BaseException:
+            self._release()
+            raise
+
+    def __exit__(self, *exc):
+        try:
+            return self._inst.__exit__(*exc)
+        finally:
+            self._release()
+
+    def _release(self):
+        global _ydl_inflight
+        do_reload = False
+        with _ydl_lock:
+            _ydl_inflight = max(0, _ydl_inflight - 1)
+            do_reload = _ydl_reload_pending and _ydl_inflight == 0
+        if do_reload:
+            threading.Thread(target=reload_ytdlp, daemon=True).start()
+
+
+def download_range_func(*args, **kwargs):
+    return _real_download_range_func(*args, **kwargs)
+
+
+def _unwrap_urllib3_percent_re():
+    """Quita el parche de yt-dlp sobre urllib3 y devuelve el objeto que habia (para poder restaurarlo)."""
+    try:
+        import urllib3.util.url as url_mod
+    except Exception:
+        return None
+    current = getattr(url_mod, '_PERCENT_RE', None)
+    original = current
+    while current is not None and current.__class__.__name__ == 'Urllib3PercentREOverride':
+        current = current.re
+    if current is not None:
+        url_mod._PERCENT_RE = current
+    return original
+
+
+def _restore_urllib3_percent_re(original) -> None:
+    if original is not None:
+        try:
+            import urllib3.util.url as url_mod
+            url_mod._PERCENT_RE = original
+        except Exception:
+            pass
+
+
+def reload_ytdlp(force: bool = False) -> bool:
+    """Recarga yt-dlp desde disco. Devuelve True si ya esta recargado; False si queda pendiente
+    porque hay descargas/consultas en curso (se recargara solo cuando terminen)."""
+    global _RealYoutubeDL, _real_download_range_func, _ydl_reload_pending, _ydl_loaded_version
+    with _ydl_lock:
+        if _ydl_inflight > 0 and not force:
+            _ydl_reload_pending = True
+            return False
+        _ydl_reload_pending = False
+        stale = [m for m in list(sys.modules)
+                 if m in ('yt_dlp', 'yt_dlp_ejs') or m.startswith(('yt_dlp.', 'yt_dlp_ejs.', 'yt_dlp_plugins'))]
+        saved = {name: sys.modules.pop(name) for name in stale}
+        importlib.invalidate_caches()
+        # Al importarse, yt-dlp "parchea" urllib3._PERCENT_RE envolviendolo en otro objeto. Importarlo por segunda vez
+        # lo envolveria dos veces y romperia TODAS las peticiones de requests (AttributeError: ... no attribute 'sub').
+        patched_re = _unwrap_urllib3_percent_re()
+        try:
+            import yt_dlp
+            from yt_dlp import YoutubeDL as new_cls
+            from yt_dlp.utils import download_range_func as new_range
+        except Exception:
+            # Si la nueva instalacion no se puede importar, conservar el motor anterior en lugar de dejar el programa sin yt-dlp
+            for name in [m for m in sys.modules if m == 'yt_dlp' or m.startswith('yt_dlp.')]:
+                del sys.modules[name]
+            sys.modules.update(saved)
+            _restore_urllib3_percent_re(patched_re)
+            raise
+        _RealYoutubeDL = new_cls
+        _real_download_range_func = new_range
+        _ydl_loaded_version = getattr(yt_dlp.version, '__version__', '')
+    return True
+
+
+def ytdlp_loaded_version() -> str:
+    """Version de yt-dlp que realmente esta cargada en memoria."""
+    return _ydl_loaded_version or get_installed_ytdlp_version()
+
+
 # Progress tracking for video downloads and system updates (thread-safe)
 tasks_lock = threading.Lock()
 download_tasks = {}  # task_id -> queue.Queue
 update_tasks = {}    # task_id -> queue.Queue
 
 # ─── SQLite History Database & ThreadPool Queue Manager ─────────────────────────
-DB_PATH = os.path.join(ROOT_DIR, "history.db")
+DB_PATH = os.environ.get("YTDL_DB_PATH") or os.path.join(ROOT_DIR, "history.db")
 db_lock = threading.Lock()
 
 
@@ -142,7 +402,7 @@ def init_db():
     """Inicializa la tabla downloads en history.db con control estricto de concurrencia."""
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS downloads (
@@ -168,7 +428,7 @@ def db_add_download(url: str, title: str, type_: str, status: str = 'pending', f
     """Inserta un nuevo registro de descarga en history.db y retorna su ID."""
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO downloads (url, title, type, status, filepath, filesize)
@@ -187,7 +447,7 @@ def db_update_download(download_id: int, status: str, filepath: str = None, file
         return
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 cursor = conn.cursor()
                 updates = ["status = ?"]
                 params = [status]
@@ -212,7 +472,7 @@ def db_get_history(limit: int = 100) -> list:
     """Obtiene el historial de descargas ordenado de forma descendente por fecha."""
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -232,7 +492,7 @@ def db_delete_download(download_id: int) -> bool:
     """Elimina un registro individual de history.db."""
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM downloads WHERE id = ?", (download_id,))
                 conn.commit()
@@ -246,7 +506,7 @@ def db_clear_history() -> bool:
     """Vacía por completo el historial de descargas en history.db."""
     try:
         with db_lock:
-            with sqlite3.connect(DB_PATH, timeout=20) as conn:
+            with closing(sqlite3.connect(DB_PATH, timeout=20)) as conn:
                 cursor = conn.cursor()
                 cursor.execute("DELETE FROM downloads")
                 conn.commit()
@@ -761,6 +1021,38 @@ def diagnose_error(err_str: str) -> dict:
     }
 
 
+NO_WINDOW = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+
+CONFIG_PATH = os.path.join(ROOT_DIR, 'config.json')
+_config_lock = threading.Lock()
+DEFAULT_CONFIG = {'auto_update': True, 'last_ytdlp_version': ''}
+
+
+def load_config() -> dict:
+    """Configuracion local (config.json junto a la app). Nunca falla: ante un archivo roto usa los valores por defecto."""
+    cfg = dict(DEFAULT_CONFIG)
+    with _config_lock:
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                cfg.update(data)
+        except (OSError, ValueError):
+            pass
+    return cfg
+
+
+def save_config(cfg: dict) -> None:
+    with _config_lock:
+        try:
+            tmp = CONFIG_PATH + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(cfg, f, indent=2, ensure_ascii=False)
+            os.replace(tmp, CONFIG_PATH)
+        except OSError as e:
+            print(f"[AVISO] No se pudo guardar config.json: {e}")
+
+
 def clear_ytdlp_cache() -> bool:
     """Clear yt-dlp player cache."""
     try:
@@ -771,19 +1063,25 @@ def clear_ytdlp_cache() -> bool:
         return False
 
 
+def get_loaded_ytdlp_version() -> str:
+    """Version de yt-dlp que esta realmente cargada en memoria."""
+    return ytdlp_loaded_version() or 'Desconocida'
+
+
 def get_installed_ytdlp_version() -> str:
-    """Get the currently installed yt-dlp version in the active Python environment."""
+    """Version de yt-dlp instalada en disco en el entorno activo (puede ser mas nueva que la cargada si falta recargar)."""
     try:
-        import yt_dlp
-        return getattr(yt_dlp.version, '__version__', 'Desconocida')
+        importlib.invalidate_caches()
+        from importlib import metadata
+        return metadata.version('yt-dlp')
     except Exception:
-        return 'No instalada'
+        return ytdlp_loaded_version() or 'No instalada'
 
 
 def get_latest_pypi_ytdlp_version() -> str:
     """Query PyPI to get the latest available version of yt-dlp."""
     try:
-        r = requests.get('https://pypi.org/pypi/yt-dlp/json', headers=REQUEST_HEADERS, timeout=5)
+        r = requests.get('https://pypi.org/pypi/yt-dlp/json', headers=REQUEST_HEADERS, timeout=6)
         if r.status_code == 200:
             return r.json().get('info', {}).get('version', '')
     except Exception:
@@ -807,26 +1105,40 @@ def get_app_version() -> str:
     return APP_VERSION
 
 
+def _find_portable_python():
+    """(python.exe, carpeta_de_codigo) de la version portable vecina, o (None, None)."""
+    portable_root = os.path.join(BASE_DIR, "YT Music Downloader Portable")
+    for sub in ["software", ""]:
+        py_path = os.path.join(portable_root, sub, "python", "python.exe") if sub else os.path.join(portable_root, "python", "python.exe")
+        if os.path.exists(py_path):
+            return py_path, (os.path.join(portable_root, sub) if sub else portable_root)
+    return None, None
+
+
 def get_portable_ytdlp_version() -> str:
     """Get the yt-dlp version installed in the Portable environment or folder."""
     # If running inside the portable environment itself
-    if os.path.basename(BASE_DIR).lower() == "software" or "portable" in sys.executable.lower() or os.path.exists(os.path.join(BASE_DIR, "python", "python.exe")):
+    if is_portable or "portable" in sys.executable.lower():
         return get_installed_ytdlp_version()
 
     # Otherwise look into neighbor portable directory
-    for sub in [("software", "python", "python.exe"), ("python", "python.exe")]:
-        portable_python = os.path.join(BASE_DIR, "YT Music Downloader Portable", *sub)
-        if os.path.exists(portable_python):
-            try:
-                res = subprocess.run(
-                    [portable_python, "-c", "import yt_dlp; print(yt_dlp.version.__version__)"],
-                    capture_output=True, text=True, timeout=5
-                )
-                if res.returncode == 0:
-                    return res.stdout.strip()
-            except Exception:
-                pass
+    portable_python, _ = _find_portable_python()
+    if portable_python:
+        try:
+            res = subprocess.run(
+                [portable_python, "-c", "from importlib import metadata; print(metadata.version('yt-dlp'))"],
+                capture_output=True, text=True, timeout=8, creationflags=NO_WINDOW
+            )
+            if res.returncode == 0:
+                return res.stdout.strip()
+        except Exception:
+            pass
     return None
+
+
+def same_version(a: str, b: str) -> bool:
+    """Compara versiones ignorando ceros a la izquierda (2026.08.19 == 2026.8.19, que es como las normaliza pip)."""
+    return [int(x) for x in re.findall(r'\d+', str(a))] == [int(x) for x in re.findall(r'\d+', str(b))]
 
 
 def is_newer_version(remote: str, current: str) -> bool:
@@ -842,28 +1154,316 @@ def is_newer_version(remote: str, current: str) -> bool:
         return str(remote).strip() != str(current).strip()
 
 
-def check_remote_app_update() -> dict:
-    """Check GitHub repository for a newer app version."""
-    current_ver = get_app_version()
+# ── Informacion remota (PyPI / GitHub) con cache para no bloquear la web ─────────
+OTA_DEFAULT_FILES = ['app.py', 'templates/index.html', 'static/style.css', 'version.json']
+update_state = {'last_check': None, 'last_result': '', 'restart_pending': False, 'auto_running': False}
+_remote_cache = {'ts': 0.0, 'pypi': None, 'ota': None, 'portable': None}
+_remote_cache_lock = threading.Lock()
+
+
+def fetch_remote_manifest(timeout: int = 6):
+    """Lee version.json de GitHub (con parametro anti-cache de la CDN). None si no se pudo."""
     if not GITHUB_RAW_BASE or "PEGA_AQUI" in GITHUB_RAW_BASE:
-        return {"update_available": False, "current_version": current_ver, "latest_version": current_ver, "changelog": ""}
+        return None
     try:
-        ver_url = f"{GITHUB_RAW_BASE.rstrip('/')}/version.json"
-        res = requests.get(ver_url, headers=REQUEST_HEADERS, timeout=5)
+        res = requests.get(f"{GITHUB_RAW_BASE.rstrip('/')}/version.json", params={'t': int(time.time())},
+                           headers=REQUEST_HEADERS, timeout=timeout)
         if res.status_code == 200:
             data = res.json()
-            remote_ver = str(data.get("version", "")).strip()
-            changelog = str(data.get("changelog", "")).strip()
-            update_available = bool(remote_ver and is_newer_version(remote_ver, current_ver))
             return {
-                "update_available": update_available,
-                "current_version": current_ver,
-                "latest_version": remote_ver or current_ver,
-                "changelog": changelog
+                'version': str(data.get('version', '')).strip(),
+                'changelog': str(data.get('changelog', '')).strip(),
+                'files': data.get('files') if isinstance(data.get('files'), dict) else {},
             }
     except Exception:
         pass
+    return None
+
+
+def refresh_remote_info(force: bool = False, max_age: int = 600) -> dict:
+    """Consulta PyPI, GitHub y la version portable en paralelo; cachea el resultado `max_age` segundos."""
+    with _remote_cache_lock:
+        if not force and time.time() - _remote_cache['ts'] < max_age:
+            return dict(_remote_cache)
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            f_pypi = pool.submit(get_latest_pypi_ytdlp_version)
+            f_ota = pool.submit(fetch_remote_manifest)
+            f_port = pool.submit(get_portable_ytdlp_version)
+            _remote_cache['pypi'] = f_pypi.result()
+            _remote_cache['ota'] = f_ota.result()
+            _remote_cache['portable'] = f_port.result()
+        _remote_cache['ts'] = time.time()
+        return dict(_remote_cache)
+
+
+def check_remote_app_update() -> dict:
+    """Check GitHub repository for a newer app version."""
+    current_ver = get_app_version()
+    manifest = refresh_remote_info().get('ota')
+    if manifest and manifest.get('version'):
+        return {
+            "update_available": is_newer_version(manifest['version'], current_ver),
+            "current_version": current_ver,
+            "latest_version": manifest['version'],
+            "changelog": manifest.get('changelog', ''),
+        }
     return {"update_available": False, "current_version": current_ver, "latest_version": current_ver, "changelog": ""}
+
+
+# ── Actualizacion de yt-dlp (pip) ───────────────────────────────────────────────
+
+def _run_pip(python_exe: str, packages: list, log, timeout: int = 900) -> bool:
+    cmd = [python_exe, '-m', 'pip', 'install', '-U', '--disable-pip-version-check', '--no-input',
+           '--timeout', '30', '--retries', '3'] + packages
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding='utf-8', errors='replace', creationflags=NO_WINDOW)
+    watchdog = threading.Timer(timeout, proc.kill)  # pip colgado (sin red) no debe bloquear para siempre
+    watchdog.start()
+    try:
+        for line in proc.stdout:
+            clean_line = strip_ansi(line.rstrip())
+            if clean_line:
+                log(f"  > {clean_line}")
+    finally:
+        watchdog.cancel()
+    proc.wait()
+    return proc.returncode == 0
+
+
+def update_ytdlp_in_env(python_exe: str, log) -> bool:
+    """Instala/actualiza yt-dlp con sus extras (yt-dlp-ejs, brotli, certifi...). Si los extras fallan, instala solo yt-dlp."""
+    if _run_pip(python_exe, ['yt-dlp[default]'], log):
+        return True
+    log("  [AVISO] Fallo la instalacion con extras; reintentando solo con yt-dlp...")
+    return _run_pip(python_exe, ['yt-dlp'], log)
+
+
+# ── Deno (resuelve los retos JavaScript de YouTube) ─────────────────────────────
+
+def find_deno():
+    for d in (os.path.join(BASE_DIR, 'deno'), os.path.join(ROOT_DIR, 'deno')):
+        exe = os.path.join(d, 'deno.exe' if os.name == 'nt' else 'deno')
+        if os.path.exists(exe):
+            return exe
+    return shutil.which('deno')
+
+
+def required_deno_version() -> tuple:
+    """Version minima de Deno que declara la yt-dlp instalada (extra 'deno'); (2, 0, 0) si no se puede saber."""
+    try:
+        from importlib import metadata
+        for req in metadata.requires('yt-dlp') or []:
+            m = re.match(r'deno\s*>=\s*([\d.]+)', req)
+            if m:
+                return tuple(int(x) for x in m.group(1).split('.'))
+    except Exception:
+        pass
+    return (2, 0, 0)
+
+
+def _deno_version(exe: str):
+    try:
+        res = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW)
+        m = re.search(r'deno\s+(\d+)\.(\d+)\.(\d+)', res.stdout)
+        if m:
+            return tuple(int(x) for x in m.groups())
+    except Exception:
+        pass
+    return None
+
+
+def install_deno_windows(deno_dir: str, log) -> bool:
+    os.makedirs(deno_dir, exist_ok=True)
+    ver_res = subprocess.run(['curl.exe', '--ssl-revoke-best-effort', '-s', 'https://dl.deno.land/release-latest.txt'],
+                             capture_output=True, text=True, timeout=15, creationflags=NO_WINDOW)
+    deno_version = ver_res.stdout.strip() if ver_res.returncode == 0 and ver_res.stdout.strip().startswith('v') else 'v2.9.8'
+    log(f"  [*] Descargando Deno {deno_version}...")
+    zip_path = os.path.join(deno_dir, 'deno.zip')
+    dl_url = f'https://dl.deno.land/release/{deno_version}/deno-x86_64-pc-windows-msvc.zip'
+    dl_res = subprocess.run(['curl.exe', '--ssl-revoke-best-effort', '-fLo', zip_path, dl_url],
+                            capture_output=True, text=True, timeout=180, creationflags=NO_WINDOW)
+    if dl_res.returncode == 0 and os.path.exists(zip_path):
+        subprocess.run(['tar.exe', 'xf', zip_path, '-C', deno_dir], capture_output=True, timeout=60, creationflags=NO_WINDOW)
+        try:
+            os.remove(zip_path)
+        except OSError:
+            pass
+        return os.path.exists(os.path.join(deno_dir, 'deno.exe'))
+    return False
+
+
+def ensure_deno(log) -> None:
+    """Comprueba que Deno exista y cumpla la version minima que pide yt-dlp; lo instala o actualiza si hace falta."""
+    exe = find_deno()
+    need = required_deno_version()
+    if exe:
+        have = _deno_version(exe)
+        log(f"  [*] Deno encontrado: {'.'.join(map(str, have)) if have else 'version desconocida'} (minimo requerido {'.'.join(map(str, need))})")
+        if have and have >= need:
+            return
+        log("  [!] Deno desactualizado; ejecutando 'deno upgrade'...")
+        try:
+            res = subprocess.run([exe, 'upgrade'], capture_output=True, text=True, timeout=240, creationflags=NO_WINDOW)
+            log(f"  [{'OK' if res.returncode == 0 else 'AVISO'}] deno upgrade termino con codigo {res.returncode}")
+        except Exception as e:
+            log(f"  [AVISO] No se pudo actualizar Deno: {e}")
+        return
+    log("  [!] Deno no encontrado; se necesita para resolver las firmas de YouTube.")
+    if os.name == 'nt':
+        deno_dir = os.path.join(BASE_DIR, 'deno')
+        try:
+            if install_deno_windows(deno_dir, log):
+                os.environ["PATH"] = deno_dir + os.pathsep + os.environ.get("PATH", "")
+                log("  [OK] Deno instalado.")
+            else:
+                log("  [ERROR] No se pudo instalar Deno automaticamente.")
+        except Exception as e:
+            log(f"  [AVISO] No se pudo instalar Deno automaticamente: {e}")
+    else:
+        log("  [INFO] Instala Deno manualmente: curl -fsSL https://deno.land/install.sh | sh")
+
+
+# ── Actualizacion del codigo de la aplicacion desde GitHub (OTA) ────────────────
+
+def _sha256_variants(data: bytes) -> set:
+    return {hashlib.sha256(data).hexdigest(), hashlib.sha256(data.replace(b'\r\n', b'\n')).hexdigest()}
+
+
+def apply_ota_update(manifest: dict, log) -> bool:
+    """Descarga el codigo nuevo a una carpeta temporal, lo verifica (hash, sintaxis y arranque de prueba) y solo
+    entonces lo instala de forma atomica con copia de seguridad. Si algo falla no se toca ningun archivo."""
+    base = GITHUB_RAW_BASE.rstrip('/')
+    wanted = list(manifest.get('files') or {}) or list(OTA_DEFAULT_FILES)
+    files = [f for f in OTA_DEFAULT_FILES if f in wanted and f != 'version.json']
+    files.append('version.json')
+    hashes = manifest.get('files') or {}
+
+    staging = tempfile.mkdtemp(prefix='ota_')
+    try:
+        # 1) Descargar y verificar integridad
+        for rel in files:
+            res = requests.get(f"{base}/{rel}", params={'t': int(time.time())}, headers=REQUEST_HEADERS, timeout=30)
+            if res.status_code != 200 or not res.content:
+                raise RuntimeError(f"No se pudo descargar {rel} (HTTP {res.status_code}).")
+            expected = hashes.get(rel)
+            if expected and expected.lower() not in _sha256_variants(res.content):
+                raise RuntimeError(f"{rel} no coincide con el hash publicado (la CDN de GitHub aun sirve una version anterior). Reintenta en unos minutos.")
+            dest = os.path.join(staging, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, 'wb') as f:
+                f.write(res.content)
+            log(f"    [OK] Descargado y verificado: {rel}")
+
+        # 2) Verificar que el codigo nuevo es valido
+        py_compile.compile(os.path.join(staging, 'app.py'), cfile=os.path.join(staging, 'app.pyc'), doraise=True)
+        for rel in ('templates/index.html', 'static/style.css'):
+            if os.path.getsize(os.path.join(staging, rel)) < 1000:
+                raise RuntimeError(f"{rel} descargado parece incompleto.")
+        smoke = subprocess.run(
+            [sys.executable, '-c', 'import app; print("SMOKE_OK", app.APP_VERSION)'],
+            cwd=staging, capture_output=True, text=True, timeout=90, creationflags=NO_WINDOW,
+            env={**os.environ, 'YTDL_SMOKE_TEST': '1', 'PYTHONDONTWRITEBYTECODE': '1'},
+        )
+        if 'SMOKE_OK' not in smoke.stdout:
+            raise RuntimeError(f"El codigo nuevo no arranca: {(smoke.stderr or smoke.stdout).strip()[-300:]}")
+        log("    [OK] El codigo nuevo supera la prueba de arranque.")
+
+        # 3) Copia de seguridad del codigo actual
+        backup_root = os.path.join(BASE_DIR, '_backup')
+        backup_dir = os.path.join(backup_root, f"{get_app_version()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        for rel in files:
+            src = os.path.join(BASE_DIR, rel)
+            if os.path.exists(src):
+                os.makedirs(os.path.dirname(os.path.join(backup_dir, rel)), exist_ok=True)
+                shutil.copy2(src, os.path.join(backup_dir, rel))
+
+        # 4) Instalar de forma atomica (version.json al final); si falla, restaurar
+        done = []
+        try:
+            for rel in files:
+                dest = os.path.join(BASE_DIR, rel)
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                tmp = dest + '.ota_new'
+                shutil.copyfile(os.path.join(staging, rel), tmp)
+                os.replace(tmp, dest)
+                done.append(rel)
+        except Exception:
+            for rel in done:
+                bak = os.path.join(backup_dir, rel)
+                if os.path.exists(bak):
+                    shutil.copyfile(bak, os.path.join(BASE_DIR, rel))
+            raise
+        if ROOT_DIR != BASE_DIR:
+            try:
+                shutil.copyfile(os.path.join(staging, 'version.json'), os.path.join(ROOT_DIR, 'version.json'))
+            except OSError:
+                pass
+
+        # Conservar solo las 3 copias de seguridad mas recientes
+        try:
+            olds = sorted(os.listdir(backup_root))[:-3]
+            for name in olds:
+                shutil.rmtree(os.path.join(backup_root, name), ignore_errors=True)
+        except OSError:
+            pass
+        return True
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def sync_code_to_portable(log) -> None:
+    """Desde la version normal: copia el codigo actualizado a la carpeta portable vecina."""
+    _, portable_dest = _find_portable_python()
+    if not portable_dest or is_portable:
+        return
+    try:
+        shutil.copy2(os.path.join(BASE_DIR, "app.py"), os.path.join(portable_dest, "app.py"))
+        ver_src = os.path.join(BASE_DIR, "version.json")
+        if os.path.exists(ver_src):
+            shutil.copy2(ver_src, os.path.join(portable_dest, "version.json"))
+            if os.path.dirname(portable_dest) and os.path.basename(portable_dest).lower() == 'software':
+                shutil.copy2(ver_src, os.path.join(os.path.dirname(portable_dest), "version.json"))
+        for folder in ["templates", "static"]:
+            src = os.path.join(BASE_DIR, folder)
+            if os.path.exists(src):
+                shutil.copytree(src, os.path.join(portable_dest, folder), dirs_exist_ok=True)
+        log("  [OK] Codigo sincronizado con la version Portable.")
+    except Exception as e:
+        log(f"  [AVISO] No se pudo sincronizar con Portable: {e}")
+
+
+def update_ytdlp_everywhere(log) -> bool:
+    """Actualiza yt-dlp en el entorno activo y en el portable vecino; limpia la cache y recarga el motor en caliente.
+    Devuelve True si el motor ya esta recargado, False si quedo pendiente a que terminen las descargas en curso."""
+    before = get_installed_ytdlp_version()
+    log(f"[*] yt-dlp instalado antes: {before}")
+    if not update_ytdlp_in_env(sys.executable, log):
+        raise RuntimeError("pip no pudo actualizar yt-dlp en el entorno principal (revisa tu conexion a internet).")
+
+    portable_python, _ = _find_portable_python()
+    if portable_python and not is_portable:
+        log("[*] Actualizando yt-dlp tambien en la version Portable...")
+        if not update_ytdlp_in_env(portable_python, lambda m: log(m.replace('  >', '  [Portable]', 1))):
+            log("  [AVISO] No se pudo actualizar yt-dlp en la version Portable.")
+
+    log("[*] Limpiando cache de firmas y reproductores de YouTube...")
+    log("  [OK] Cache eliminada." if clear_ytdlp_cache() else "  [AVISO] No habia cache que limpiar.")
+
+    ensure_deno(log)
+
+    after = get_installed_ytdlp_version()
+    log(f"[*] yt-dlp instalado ahora: {after}")
+    reloaded = reload_ytdlp()
+    if reloaded:
+        log(f"  [OK] Motor recargado en memoria: yt-dlp {get_loaded_ytdlp_version()} (sin reiniciar el programa).")
+    else:
+        log("  [INFO] Hay descargas en curso: el motor nuevo se cargara solo cuando terminen.")
+    cfg = load_config()
+    cfg['last_ytdlp_version'] = after
+    save_config(cfg)
+    with _remote_cache_lock:
+        _remote_cache['ts'] = 0.0
+    return reloaded
 
 
 def _run_system_update(task_id: str):
@@ -879,195 +1479,206 @@ def _run_system_update(task_id: str):
         log("=======================================================\n")
         log(f"[*] Entorno actual: Python {sys.version.split()[0]} | App: v{APP_VERSION}")
 
-        # 1. Check and download OTA App Updates from GitHub if available
-        log("[1/6] Comprobando actualizaciones remotas de la aplicación en GitHub...")
-        ota_updated = False
+        log("\n[1/3] Comprobando actualizaciones de la aplicación en GitHub...")
+        restart_required = False
+        manifest = fetch_remote_manifest(timeout=10)
         current_app_ver = get_app_version()
-        if GITHUB_RAW_BASE and "PEGA_AQUI" not in GITHUB_RAW_BASE:
-            try:
-                ver_url = f"{GITHUB_RAW_BASE.rstrip('/')}/version.json"
-                r = requests.get(ver_url, headers=REQUEST_HEADERS, timeout=6)
-                if r.status_code == 200:
-                    r_data = r.json()
-                    remote_ver = str(r_data.get("version", "")).strip()
-                    remote_changelog = str(r_data.get("changelog", "")).strip()
-                    log(f"  > Versión instalada: v{current_app_ver} | Versión en GitHub: v{remote_ver}")
-                    if remote_ver and is_newer_version(remote_ver, current_app_ver):
-                        log(f"  [!] ¡Nueva versión de la app encontrada: v{remote_ver}!")
-                        if remote_changelog:
-                            log(f"  > Notas: {remote_changelog}")
-                        log("  [*] Descargando código actualizado desde GitHub...")
-
-                        files_to_sync = [
-                            ("app.py", "app.py"),
-                            ("templates/index.html", "templates/index.html"),
-                            ("static/style.css", "static/style.css"),
-                            ("version.json", "version.json"),
-                        ]
-                        for rel_path, dest_rel in files_to_sync:
-                            file_url = f"{GITHUB_RAW_BASE.rstrip('/')}/{rel_path}"
-                            f_res = requests.get(file_url, headers=REQUEST_HEADERS, timeout=10)
-                            if f_res.status_code == 200:
-                                dest_path = os.path.join(BASE_DIR, dest_rel)
-                                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                                with open(dest_path, "wb") as f_out:
-                                    f_out.write(f_res.content)
-                                if dest_rel == "version.json" and ROOT_DIR != BASE_DIR:
-                                    try:
-                                        with open(os.path.join(ROOT_DIR, "version.json"), "wb") as f_root_ver:
-                                            f_root_ver.write(f_res.content)
-                                    except Exception:
-                                        pass
-                                log(f"    [OK] Descargado: {dest_rel}")
-                                ota_updated = True
-                            else:
-                                log(f"    [AVISO] No se pudo descargar {rel_path} (HTTP {f_res.status_code})")
-                        if ota_updated:
-                            log("  [✓] Archivos de la aplicación actualizados exitosamente vía OTA.")
-                    else:
-                        log("  [OK] El código de la aplicación ya se encuentra en su última versión.")
-                else:
-                    log(f"  [AVISO] No se pudo leer version.json en GitHub (HTTP {r.status_code})")
-            except Exception as ota_err:
-                log(f"  [AVISO] Consulta OTA omitida: {ota_err}")
+        if manifest and manifest['version']:
+            log(f"  > Versión instalada: v{current_app_ver} | Versión en GitHub: v{manifest['version']}")
+            if is_newer_version(manifest['version'], current_app_ver):
+                log(f"  [!] ¡Nueva versión de la app encontrada: v{manifest['version']}!")
+                if manifest['changelog']:
+                    log(f"  > Notas: {manifest['changelog']}")
+                try:
+                    if apply_ota_update(manifest, log):
+                        log("  [✓] Archivos de la aplicación actualizados. Se reiniciará para aplicarlos.")
+                        restart_required = True
+                        update_state['restart_pending'] = True
+                        sync_code_to_portable(log)
+                except Exception as ota_err:
+                    log(f"  [AVISO] No se actualizó el código de la app (se conserva la versión actual): {ota_err}")
+            else:
+                log("  [OK] El código de la aplicación ya está en su última versión.")
         else:
-            log("  [INFO] Repositorio de GitHub no configurado para OTA.")
+            log("  [AVISO] No se pudo consultar GitHub (¿sin conexión?). Se continúa con yt-dlp.")
 
-        # 2. Update yt-dlp via pip in main environment
-        log("\n[2/6] Actualizando librería yt-dlp vía pip en entorno activo...")
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        for line in proc.stdout:
-            clean_line = strip_ansi(line.rstrip())
-            if clean_line:
-                log(f"  > {clean_line}")
-        proc.wait()
-        if proc.returncode != 0:
-            raise RuntimeError(f"pip install falló con código {proc.returncode} al actualizar yt-dlp en el entorno principal.")
+        log("\n[2/3] Actualizando yt-dlp, cache y Deno...")
+        reloaded = update_ytdlp_everywhere(log)
 
-        # 3. Check if portable version exists and update it too
-        portable_root = os.path.join(BASE_DIR, "YT Music Downloader Portable")
-        portable_python = None
-        portable_dest = None
-        for sub in ["software", ""]:
-            py_path = os.path.join(portable_root, sub, "python", "python.exe") if sub else os.path.join(portable_root, "python", "python.exe")
-            if os.path.exists(py_path):
-                portable_python = py_path
-                portable_dest = os.path.join(portable_root, sub) if sub else portable_root
-                break
-
-        if portable_python and portable_dest:
-            log("\n[3/6] Detectada carpeta Portable. Actualizando yt-dlp en entorno Portable...")
-            proc2 = subprocess.Popen(
-                [portable_python, "-m", "pip", "install", "-U", "yt-dlp"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-            )
-            for line in proc2.stdout:
-                clean_line = strip_ansi(line.rstrip())
-                if clean_line:
-                    log(f"  [Portable] {clean_line}")
-            proc2.wait()
-            if proc2.returncode != 0:
-                log(f"  [AVISO] pip retornó código de salida {proc2.returncode} en el entorno portable.")
-
-            # Synchronize code files to portable
-            log("\n[4/6] Sincronizando archivos (app.py, templates, static, version.json) con Portable...")
-            try:
-                shutil.copy2(os.path.join(BASE_DIR, "app.py"), os.path.join(portable_dest, "app.py"))
-                ver_src = os.path.join(BASE_DIR, "version.json")
-                if os.path.exists(ver_src):
-                    shutil.copy2(ver_src, os.path.join(portable_dest, "version.json"))
-                for folder in ["templates", "static"]:
-                    src = os.path.join(BASE_DIR, folder)
-                    dst = os.path.join(portable_dest, folder)
-                    if os.path.exists(src):
-                        shutil.copytree(src, dst, dirs_exist_ok=True)
-                log("  [OK] Código sincronizado exitosamente en la versión Portable.")
-            except Exception as e:
-                log(f"  [AVISO] No se pudo sincronizar archivos a Portable: {e}")
-        else:
-            log("\n[3/6] Versión Portable no detectada como carpeta vecina.")
-            log("[4/6] Omitiendo sincronización secundaria.")
-
-        # 4. Clear cache
-        log("\n[5/6] Limpiando memoria caché de firmas de YouTube...")
-        if clear_ytdlp_cache():
-            log("  [OK] Caché de firmas y reproductores eliminada.")
-        else:
-            log("  [AVISO] No fue necesario vaciar caché.")
-
-        # 5. Ensure Deno JS runtime is present (required by yt-dlp 2026+ for YouTube signature solving)
-        log("\n[6/6] Verificando runtime de JavaScript (Deno) para resolución de firmas YouTube...")
-        deno_dir = os.path.join(BASE_DIR, "deno")
-        deno_exe = os.path.join(deno_dir, "deno.exe") if os.name == 'nt' else os.path.join(deno_dir, "deno")
-        deno_installed = False
-        if os.path.exists(deno_exe):
-            log(f"  [OK] Deno ya está instalado en: {deno_dir}")
-            # Check for Deno updates
-            try:
-                deno_ver_res = subprocess.run([deno_exe, '--version'], capture_output=True, text=True, timeout=5)
-                if deno_ver_res.returncode == 0:
-                    log(f"  [*] Versión actual: {deno_ver_res.stdout.splitlines()[0].strip()}")
-            except Exception:
-                pass
-            deno_installed = True
-        else:
-            log("  [!] Deno no encontrado. Descargando para soporte de firmas YouTube...")
-            try:
-                os.makedirs(deno_dir, exist_ok=True)
-                if os.name == 'nt':
-                    # Get latest version
-                    ver_res = subprocess.run(['curl.exe', '--ssl-revoke-best-effort', '-s', 'https://dl.deno.land/release-latest.txt'],
-                                             capture_output=True, text=True, timeout=10)
-                    deno_version = ver_res.stdout.strip() if ver_res.returncode == 0 else 'v2.9.8'
-                    log(f"  [*] Descargando Deno {deno_version}...")
-                    zip_path = os.path.join(deno_dir, 'deno.zip')
-                    dl_url = f'https://dl.deno.land/release/{deno_version}/deno-x86_64-pc-windows-msvc.zip'
-                    dl_res = subprocess.run(['curl.exe', '--ssl-revoke-best-effort', '-Lo', zip_path, dl_url],
-                                            capture_output=True, text=True, timeout=120)
-                    if dl_res.returncode == 0 and os.path.exists(zip_path):
-                        subprocess.run(['tar.exe', 'xf', zip_path, '-C', deno_dir], capture_output=True, timeout=30)
-                        try:
-                            os.remove(zip_path)
-                        except Exception:
-                            pass
-                        if os.path.exists(deno_exe):
-                            log(f"  [OK] Deno {deno_version} instalado exitosamente.")
-                            deno_installed = True
-                        else:
-                            log("  [ERROR] No se encontró deno.exe después de la extracción.")
-                    else:
-                        log(f"  [ERROR] Falló la descarga de Deno (código {dl_res.returncode}).")
-                else:
-                    log("  [INFO] Instala Deno manualmente: curl -fsSL https://deno.land/install.sh | sh")
-            except Exception as deno_err:
-                log(f"  [AVISO] No se pudo instalar Deno automáticamente: {deno_err}")
-
-        if deno_installed and deno_dir not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = deno_dir + os.pathsep + os.environ.get("PATH", "")
-
-        new_version = get_installed_ytdlp_version()
+        log("\n[3/3] Verificación final...")
+        new_version = get_loaded_ytdlp_version()
         log("\n=======================================================")
         log(f" [✓] ¡MANTENIMIENTO Y ACTUALIZACIÓN COMPLETADOS!")
-        log(f" [✓] yt-dlp versión instalada: {new_version}")
-        log(f" [✓] App versión: v{APP_VERSION}")
+        log(f" [✓] yt-dlp en uso: {new_version}")
+        log(f" [✓] App: v{APP_VERSION}" + (" → se aplicará al reiniciar" if restart_required else ""))
         log("=======================================================\n")
 
         q.put({
             'status': 'complete',
             'version': new_version,
-            'message': f'yt-dlp actualizado a la versión {new_version}.'
+            'restart_required': restart_required,
+            'engine_reloaded': reloaded,
+            'message': (f'Actualizado: yt-dlp {new_version}.' + (' Reiniciando para aplicar la nueva versión de la app...' if restart_required else '')),
         })
 
     except Exception as e:
         log(f"\n[ERROR CRÍTICO] Falló la actualización: {e}")
         q.put({'status': 'error', 'message': str(e)})
+
+
+# ── Auto-actualizacion en segundo plano ─────────────────────────────────────────
+AUTO_UPDATE_INTERVAL = 6 * 3600
+_heal_lock = threading.Lock()
+_last_heal = 0.0
+_HEAL_PATTERNS = (
+    'unable to extract', 'nsig', 'signature', 'http error 403', 'requested format is not available',
+    'player response', 'precondition check failed', 'no video formats', 'challenge', 'ejs',
+    'unable to download video data', 'unable to download webpage', 'sabr', 'po token',
+)
+
+
+def looks_like_ytdlp_breakage(message: str) -> bool:
+    low = (message or '').lower()
+    return any(p in low for p in _HEAL_PATTERNS)
+
+
+def auto_heal(reason: str) -> bool:
+    """Autorreparacion ante un fallo tipico de cambios en YouTube: limpia la cache y, si hay una yt-dlp mas nueva,
+    la instala y recarga. Como maximo una vez cada 15 minutos. Devuelve True si cambio algo y merece reintentar."""
+    global _last_heal
+    with _heal_lock:
+        if time.time() - _last_heal < 900:
+            return False
+        _last_heal = time.time()
+    print(f"[auto-heal] Fallo detectado ({reason[:120]}). Limpiando cache y buscando una yt-dlp mas nueva...")
+    changed = clear_ytdlp_cache()
+    try:
+        latest = get_latest_pypi_ytdlp_version()
+        if latest and is_newer_version(latest, get_installed_ytdlp_version()):
+            update_ytdlp_everywhere(lambda m: print(f"[auto-heal] {m}"))
+            changed = True
+        elif not same_version(get_installed_ytdlp_version(), get_loaded_ytdlp_version()):
+            reload_ytdlp()
+            changed = True
+    except Exception as e:
+        print(f"[auto-heal] No se pudo actualizar yt-dlp: {e}")
+    return changed
+
+
+def is_idle(quiet_seconds: int = 45) -> bool:
+    """True si no hay descargas ni consultas y el usuario lleva un rato sin interactuar con la web."""
+    with queue_mgr.lock:
+        busy = bool(queue_mgr.active_tasks or queue_mgr.pending_queue)
+    return not busy and _ydl_inflight == 0 and (time.time() - _last_user_activity) >= quiet_seconds
+
+
+def schedule_restart_when_idle():
+    """Reinicia el programa en cuanto este inactivo (para aplicar codigo nuevo). La web se recarga sola."""
+    def waiter():
+        while not is_idle():
+            time.sleep(5)
+        request_restart()
+    threading.Thread(target=waiter, daemon=True, name='restart-when-idle').start()
+
+
+def run_auto_update_cycle() -> str:
+    """Un ciclo de comprobacion/actualizacion automatica. Devuelve un resumen legible."""
+    update_state['auto_running'] = True
+    summary = []
+    try:
+        info = refresh_remote_info(force=True)
+        log = lambda m: print(f"[auto-update] {m}")
+
+        latest = info.get('pypi')
+        installed = get_installed_ytdlp_version()
+        if latest and is_newer_version(latest, installed):
+            log(f"yt-dlp {installed} -> {latest}")
+            update_ytdlp_everywhere(log)
+            summary.append(f'yt-dlp {installed} -> {latest}')
+        elif not same_version(installed, get_loaded_ytdlp_version()):
+            reload_ytdlp()
+            summary.append('motor yt-dlp recargado')
+        elif importlib.util.find_spec('yt_dlp_ejs') is None and not load_config().get('ejs_install_tried'):
+            # Instalaciones antiguas no traen yt-dlp-ejs (resolutor de retos JS de YouTube): instalarlo una vez
+            cfg = load_config()
+            cfg['ejs_install_tried'] = True
+            save_config(cfg)
+            log("Instalando extras de yt-dlp (yt-dlp-ejs, brotli, certifi...)")
+            if update_ytdlp_in_env(sys.executable, log):
+                reload_ytdlp()
+                summary.append('extras de yt-dlp instalados')
+
+        manifest = info.get('ota')
+        if manifest and manifest.get('version') and is_newer_version(manifest['version'], get_app_version()):
+            log(f"App {get_app_version()} -> {manifest['version']}")
+            if apply_ota_update(manifest, log):
+                sync_code_to_portable(log)
+                update_state['restart_pending'] = True
+                summary.append(f"app -> {manifest['version']} (reinicio pendiente)")
+                schedule_restart_when_idle()
+    except Exception as e:
+        summary.append(f'error: {e}')
+    finally:
+        update_state['auto_running'] = False
+        update_state['last_check'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        update_state['last_result'] = '; '.join(summary) or 'Todo al dia'
+    return update_state['last_result']
+
+
+def auto_update_worker():
+    time.sleep(20)
+    while True:
+        try:
+            if load_config().get('auto_update', True):
+                run_auto_update_cycle()
+        except Exception as e:
+            print(f"[auto-update] Error inesperado: {e}")
+        time.sleep(AUTO_UPDATE_INTERVAL)
+
+
+# ─── Extraccion / descarga con yt-dlp (cookies, autorreparacion) ────────────────
+
+def ydl_extract(ydl_opts: dict, url: str, download: bool = False):
+    """extract_info con dos redes de seguridad: reintenta sin cookies del navegador y, ante un fallo tipico de
+    cambios en YouTube, limpia la cache / actualiza yt-dlp (auto_heal) y reintenta una vez."""
+    opts = dict(ydl_opts)
+    healed = False
+    while True:
+        try:
+            with YoutubeDL(opts) as ydl:
+                return ydl.extract_info(url, download=download)
+        except Exception as e:
+            if 'cookiesfrombrowser' in opts:
+                opts.pop('cookiesfrombrowser', None)
+                continue
+            if not healed and looks_like_ytdlp_breakage(str(e)) and auto_heal(str(e)):
+                healed = True
+                continue
+            raise
+
+
+def ydl_download(ydl_opts: dict, url: str, notify=None):
+    """Igual que ydl_extract pero para descargar. `notify(msg)` recibe avisos de los reintentos."""
+    opts = dict(ydl_opts)
+    healed = False
+    while True:
+        try:
+            with YoutubeDL(opts) as ydl:
+                return ydl.download([url])
+        except DownloadCancelled:
+            raise
+        except Exception as e:
+            if 'cookiesfrombrowser' in opts:
+                if notify:
+                    notify('[Aviso] Reintentando descarga sin cookies del navegador...')
+                opts.pop('cookiesfrombrowser', None)
+                continue
+            if not healed and looks_like_ytdlp_breakage(str(e)) and auto_heal(str(e)):
+                if notify:
+                    notify('[Aviso] YouTube cambio algo: se limpio la cache / actualizo yt-dlp. Reintentando...')
+                healed = True
+                continue
+            raise
 
 
 # ─── Music Functions ────────────────────────────────────────────────────────────
@@ -1084,16 +1695,7 @@ def extract_metadata(url: str, cookies_from_browser: str = None) -> dict:
     }
     apply_browser_cookies(ydl_opts, cookies_from_browser)
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
-    except Exception as e:
-        if 'cookiesfrombrowser' in ydl_opts:
-            ydl_opts.pop('cookiesfrombrowser', None)
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(clean_url, download=False)
-        else:
-            raise
+    info = ydl_extract(ydl_opts, clean_url)
 
     if not info:
         raise RuntimeError("No se pudo obtener información del enlace proporcionado.")
@@ -1104,8 +1706,8 @@ def extract_metadata(url: str, cookies_from_browser: str = None) -> dict:
             info = first_entry
 
     # Clean up the title - often contains " - Topic" or other noise
-    title = info.get('track') or info.get('title', 'Unknown')
-    artist = info.get('artist') or info.get('uploader') or info.get('channel', 'Unknown')
+    title = info.get('track') or info.get('title') or 'Unknown'
+    artist = info.get('artist') or info.get('uploader') or info.get('channel') or 'Unknown'
 
     # Remove " - Topic" suffix from artist names (YouTube Music auto-channels)
     if artist.endswith(' - Topic'):
@@ -1214,16 +1816,7 @@ def download_and_tag(url: str, metadata: dict, sponsorblock: bool = False, cooki
     apply_browser_cookies(ydl_opts, cookies_from_browser)
 
     # Download
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([clean_url])
-    except Exception as e:
-        if 'cookiesfrombrowser' in ydl_opts:
-            ydl_opts.pop('cookiesfrombrowser', None)
-            with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([clean_url])
-        else:
-            raise
+    ydl_download(ydl_opts, clean_url, notify=(lambda m: q.put({'status': 'log', 'message': m})) if q else None)
 
     mp3_path = output_path + '.mp3'
 
@@ -1235,10 +1828,7 @@ def download_and_tag(url: str, metadata: dict, sponsorblock: bool = False, cooki
                 break
 
     if not os.path.exists(mp3_path):
-        err_msg = 'No se pudo encontrar el archivo MP3 descargado.'
-        if q:
-            q.put({'status': 'error', 'message': err_msg})
-        return {'success': False, 'error': err_msg}
+        raise RuntimeError('No se pudo encontrar el archivo MP3 descargado.')
 
     if q:
         q.put({
@@ -1273,7 +1863,7 @@ def download_and_tag(url: str, metadata: dict, sponsorblock: bool = False, cooki
     thumbnail_url = metadata.get('thumbnail_url', '')
     if thumbnail_url:
         try:
-            resp = requests.get(thumbnail_url, headers=REQUEST_HEADERS, timeout=15)
+            resp = safe_fetch(thumbnail_url)
             if resp.status_code == 200 and resp.content:
                 jpeg_bytes, mime_type = convert_image_to_jpeg(resp.content)
                 tags.add(APIC(
@@ -1323,16 +1913,7 @@ def extract_video_info(url: str, cookies_from_browser: str = None) -> dict:
     }
     apply_browser_cookies(ydl_opts, cookies_from_browser)
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
-    except Exception as e:
-        if 'cookiesfrombrowser' in ydl_opts:
-            ydl_opts.pop('cookiesfrombrowser', None)
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(clean_url, download=False)
-        else:
-            raise
+    info = ydl_extract(ydl_opts, clean_url)
 
     if not info:
         raise RuntimeError("No se pudo obtener información del video.")
@@ -1500,10 +2081,9 @@ def _do_video_download(url, height, download_type, title, task_id,
         if not safe_title:
             t_opts = {**YDL_COMMON, 'quiet': True, 'skip_download': True, 'playlist_items': '1'}
             apply_browser_cookies(t_opts, cookies_from_browser)
-            with YoutubeDL(t_opts) as ydl:
-                info = ydl.extract_info(clean_url, download=False)
-                if 'entries' in info and info['entries']:
-                    info = info['entries'][0]
+            info = ydl_extract(t_opts, clean_url)
+            if 'entries' in info and info['entries']:
+                info = info['entries'][0]
             safe_title = sanitize_filename(info.get('title', 'video'))
 
         target_dir = CANCIONES_DIR if download_type == 'audio_only' else VIDEOS_DIR
@@ -1604,6 +2184,7 @@ def _do_video_download(url, height, download_type, title, task_id,
             def error(self, msg):
                 q.put({'status': 'log', 'message': f'ERROR: {strip_ansi(str(msg))}'})
 
+        has_embedded_subs = False
         ydl_opts = {
             **YDL_COMMON,
             'format': format_str,
@@ -1655,23 +2236,27 @@ def _do_video_download(url, height, download_type, title, task_id,
                     'key': 'FFmpegEmbedSubtitle',
                     'already_have_subtitle': False,
                 })
-                # Prevent 1 bad subtitle stream from failing whole download
-                ydl_opts['ignoreerrors'] = True
+                has_embedded_subs = True
 
         if is_split:
             ydl_opts['postprocessors'].append({'key': 'FFmpegSplitChapters'})
 
+        notify = lambda m: q.put({'status': 'log', 'message': m})
         try:
-            with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([clean_url])
+            ydl_download(ydl_opts, clean_url, notify=notify)
+        except DownloadCancelled:
+            raise
         except Exception as dl_err:
-            if 'cookiesfrombrowser' in ydl_opts:
-                q.put({'status': 'log', 'message': '[Aviso] Reintentando descarga sin cookies del navegador...'})
-                ydl_opts.pop('cookiesfrombrowser', None)
-                with YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([clean_url])
+            # Un subtitulo defectuoso (p. ej. HTTP 429 en uno traducido) no debe impedir bajar el video
+            if has_embedded_subs and 'subtitle' in str(dl_err).lower():
+                notify('[Aviso] No se pudieron obtener los subtitulos; descargando el video sin subtitulos incrustados...')
+                for key in ('writesubtitles', 'writeautomaticsub', 'subtitleslangs', 'subtitlesformat'):
+                    ydl_opts.pop(key, None)
+                ydl_opts['postprocessors'] = [pp for pp in ydl_opts['postprocessors']
+                                              if pp.get('key') not in ('FFmpegSubtitlesConvertor', 'FFmpegEmbedSubtitle')]
+                ydl_download(ydl_opts, clean_url, notify=notify)
             else:
-                raise dl_err
+                raise
 
         # ── Clean up leftover raw subtitle files once embedded into MP4 ─────────
         if embed_subs and download_type != 'audio_only':
@@ -1698,7 +2283,7 @@ def _do_video_download(url, height, download_type, title, task_id,
                     best_t = max(t_list, key=lambda t: t.get('width', 0) * t.get('height', 0))
                     t_url = best_t.get('url', t_url)
                 if t_url:
-                    t_resp = requests.get(t_url, headers=REQUEST_HEADERS, timeout=12)
+                    t_resp = safe_fetch(t_url, timeout=12)
                     if t_resp.status_code == 200:
                         ct = t_resp.headers.get('Content-Type', 'image/jpeg')
                         t_ext = 'png' if 'png' in ct else ('webp' if 'webp' in ct else 'jpg')
@@ -1720,10 +2305,12 @@ def _do_video_download(url, height, download_type, title, task_id,
 
             if not os.path.exists(final_path):
                 for f in os.listdir(target_dir):
-                    if f.startswith(safe_title) and not f.endswith('.part'):
+                    if f.startswith(safe_title) and not f.endswith(('.part', '.ytdl', '.srt', '.vtt', '.json3', '.ttml')):
                         final_path = os.path.join(target_dir, f)
                         break
             final_filename = os.path.basename(final_path)
+            if not os.path.isfile(final_path):
+                raise RuntimeError('La descarga termino pero no se encontro el archivo resultante.')
 
         fsize = format_bytes(os.path.getsize(final_path)) if (os.path.exists(final_path) and not is_split) else ''
         if task_id:
@@ -1738,6 +2325,13 @@ def _do_video_download(url, height, download_type, title, task_id,
         })
 
     except DownloadCancelled:
+        # No dejar archivos a medias (.part / .ytdl) de una descarga cancelada
+        try:
+            for f in os.listdir(target_dir):
+                if f.startswith(safe_title) and f.endswith(('.part', '.ytdl')):
+                    os.remove(os.path.join(target_dir, f))
+        except Exception:
+            pass
         raise
     except Exception as e:
         clean_err = strip_ansi(str(e))
@@ -1867,7 +2461,10 @@ def video_download():
     """Start a video download via centralized queue manager with controlled concurrency."""
     data = request.get_json(force=True)
     url = data.get('url', '').strip()
-    height = int(data.get('height', 1080))
+    try:
+        height = max(144, min(4320, int(data.get('height', 1080))))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'Calidad no valida.'}), 400
     download_type = data.get('type', 'video_audio')
     title = data.get('title', '')
     audio_lang = data.get('audio_lang')
@@ -2054,7 +2651,7 @@ def video_thumbnail():
         return jsonify({'success': False, 'error': 'No se proporciono URL de miniatura.'}), 400
 
     try:
-        resp = requests.get(thumb_url, headers=REQUEST_HEADERS, timeout=15)
+        resp = safe_fetch(thumb_url)
         if resp.status_code != 200:
             return jsonify({'success': False, 'error': 'No se pudo descargar la miniatura.'}), 500
 
@@ -2070,7 +2667,7 @@ def video_thumbnail():
             'success': True,
             'filename': filename,
             'path': filepath,
-            'download_url': f'/api/download-file/miniaturas/{filename}'
+            'download_url': f'/api/download-file/miniaturas/{quote(filename)}'
         })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2201,15 +2798,7 @@ def _find_original_auto_lang(clean_url, cookies_from_browser):
     """Devuelve el idioma original de los subtitulos automaticos (la pista sin 'tlang=' en su URL)."""
     ydl_opts = {**YDL_COMMON, 'quiet': True, 'no_warnings': True, 'skip_download': True, 'playlist_items': '1'}
     apply_browser_cookies(ydl_opts, cookies_from_browser)
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
-    except Exception:
-        if 'cookiesfrombrowser' not in ydl_opts:
-            raise
-        ydl_opts.pop('cookiesfrombrowser', None)
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(clean_url, download=False)
+    info = ydl_extract(ydl_opts, clean_url)
     if info.get('entries'):
         info = next((e for e in info['entries'] if e), info)
 
@@ -2345,7 +2934,7 @@ def video_subtitles():
             'success': True,
             'filename': filename,
             'path': filepath,
-            'download_url': f'/api/download-file/subtitulos/{filename}',
+            'download_url': f'/api/download-file/subtitulos/{quote(filename)}',
             'preview': plain_text[:3000],
             'total_length': len(plain_text),
             'note': note,
@@ -2420,10 +3009,11 @@ def open_folder():
         # Sanitize against path traversal attacks
         cand = os.path.normpath(os.path.abspath(target))
         root_abs = os.path.normpath(os.path.abspath(ROOT_DIR))
-        if cand.startswith(root_abs) and os.path.isdir(cand):
-            raw_path = cand
-        else:
-            raw_path = VIDEOS_DIR
+        try:
+            inside_root = os.path.commonpath([cand, root_abs]) == root_abs
+        except ValueError:  # otra unidad (C: vs D:)
+            inside_root = False
+        raw_path = cand if (inside_root and os.path.isdir(cand)) else VIDEOS_DIR
 
     try:
         ok, resolved_path = _launch_explorer(raw_path)
@@ -2458,56 +3048,82 @@ def serve_file(folder, filename):
 
 @app.route('/api/system/status')
 def system_status():
-    """Get installed and remote yt-dlp versions and health status."""
-    installed = get_installed_ytdlp_version()
-    latest = get_latest_pypi_ytdlp_version()
-    portable_ytdlp_ver = get_portable_ytdlp_version()
+    """Estado de yt-dlp y de la app (con cache de 10 min; ?force=1 la ignora)."""
+    info = refresh_remote_info(force=request.args.get('force') == '1')
+    loaded = get_loaded_ytdlp_version()
+    on_disk = get_installed_ytdlp_version()
+    latest = info.get('pypi')
+    ytdlp_update = bool(latest and is_newer_version(latest, on_disk))
+
     app_ver = get_app_version()
-
-    ytdlp_update = False
-    if latest and installed and installed != 'Desconocida':
-        # Normalize versions (e.g., 2026.08.19 vs 2026.8.19)
-        def norm(v):
-            return [int(x) for x in re.findall(r'\d+', str(v))]
-        try:
-            ytdlp_update = norm(latest) > norm(installed)
-        except Exception:
-            ytdlp_update = (installed != latest)
-
-    app_update = check_remote_app_update()
-    app_update_available = bool(app_update.get("update_available", False))
-    update_available = bool(ytdlp_update or app_update_available)
+    manifest = info.get('ota') or {}
+    app_update_available = bool(manifest.get('version') and is_newer_version(manifest['version'], app_ver))
+    restart_required = bool(update_state['restart_pending'] or is_newer_version(app_ver, APP_VERSION))
+    engine_stale = not same_version(loaded, on_disk)
+    update_available = bool(ytdlp_update or app_update_available or engine_stale)
 
     return jsonify({
         'success': True,
         'app_version': app_ver,
-        'installed_version': installed,
-        'latest_version': latest or installed,
+        'code_version': APP_VERSION,
+        'installed_version': loaded,
+        'disk_version': on_disk,
+        'latest_version': latest or on_disk,
         'update_available': update_available,
         'ytdlp_update_available': ytdlp_update,
         'app_update_available': app_update_available,
-        'remote_app_version': app_update.get("latest_version", app_ver),
+        'engine_stale': engine_stale,
+        'engine_reload_pending': _ydl_reload_pending,
+        'restart_required': restart_required,
+        'remote_app_version': manifest.get('version') or app_ver,
         'has_portable': True,
         'portable_version': app_ver,
-        'portable_ytdlp_version': portable_ytdlp_ver or installed,
+        'portable_ytdlp_version': info.get('portable') or on_disk,
+        'auto_update': bool(load_config().get('auto_update', True)),
+        'last_auto_check': update_state['last_check'],
+        'last_auto_result': update_state['last_result'],
+        'boot_id': BOOT_ID,
     })
+
+
+_update_lock = threading.Lock()
+_current_update_task = {'id': None}
 
 
 @app.route('/api/system/update', methods=['POST'])
 def system_update():
-    """Trigger system update in background thread."""
-    task_id = str(uuid.uuid4())
-    with tasks_lock:
-        update_tasks[task_id] = queue.Queue()
+    """Trigger system update in background thread (una sola a la vez)."""
+    with _update_lock:
+        existing = _current_update_task['id']
+        with tasks_lock:
+            if existing and existing in update_tasks:
+                return jsonify({'success': True, 'task_id': existing, 'already_running': True})
+            task_id = str(uuid.uuid4())
+            update_tasks[task_id] = queue.Queue()
+        _current_update_task['id'] = task_id
 
-    thread = threading.Thread(
-        target=_run_system_update,
-        args=(task_id,),
-        daemon=True,
-    )
-    thread.start()
+    def runner():
+        try:
+            _run_system_update(task_id)
+        finally:
+            with _update_lock:
+                if _current_update_task['id'] == task_id:
+                    _current_update_task['id'] = None
 
+    threading.Thread(target=runner, daemon=True).start()
     return jsonify({'success': True, 'task_id': task_id})
+
+
+@app.route('/api/system/auto-update', methods=['GET', 'POST'])
+def system_auto_update():
+    """Consulta o cambia la auto-actualizacion automatica en segundo plano."""
+    cfg = load_config()
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        cfg['auto_update'] = bool(data.get('enabled', True))
+        save_config(cfg)
+    return jsonify({'success': True, 'auto_update': bool(cfg.get('auto_update', True)),
+                    'last_check': update_state['last_check'], 'last_result': update_state['last_result']})
 
 
 @app.route('/api/system/update-progress/<task_id>')
@@ -2565,88 +3181,109 @@ def check_app_update_route():
         })
 
 
+_discord_lock = threading.Lock()
+_discord_last_post = 0.0
+
+
+def _fence(text: str, limit: int) -> str:
+    """Texto seguro para un bloque de codigo de Discord (sin cerrar el bloque ni mencionar a nadie)."""
+    return str(text).replace('```', "'''").replace('@', '@​')[:limit]
+
+
+def post_discord(payload: dict) -> tuple:
+    """Envia un embed al webhook. Devuelve (enviado, error). Sin menciones, con limite de frecuencia y reintento ante 429."""
+    global _discord_last_post
+    if not BUG_REPORT_WEBHOOK or BUG_REPORT_WEBHOOK.startswith("PEGA_AQUI"):
+        return False, 'El webhook de Discord no esta configurado (falta bug_webhook.txt).'
+    with _discord_lock:
+        if time.time() - _discord_last_post < 3:
+            return False, 'Espera unos segundos antes de enviar otro mensaje.'
+        _discord_last_post = time.time()
+    payload = {**payload, 'username': 'Descargador Universal', 'allowed_mentions': {'parse': []}}
+    try:
+        for attempt in range(2):
+            resp = requests.post(BUG_REPORT_WEBHOOK, json=payload, headers=REQUEST_HEADERS, timeout=10)
+            if resp.status_code in (200, 204):
+                return True, None
+            if resp.status_code == 429 and attempt == 0:
+                try:
+                    wait = float(resp.json().get('retry_after', 1))
+                except Exception:
+                    wait = 1.0
+                if wait <= 5:
+                    time.sleep(wait)
+                    continue
+            return False, f"Discord HTTP {resp.status_code}: {resp.text[:200]}"
+    except Exception as e:
+        return False, str(e)
+    return False, 'No se pudo enviar el mensaje.'
+
+
+def _append_local_log(text: str) -> str:
+    log_file = os.path.join(ROOT_DIR, 'ultimo_reporte_error.log')
+    try:
+        if os.path.exists(log_file) and os.path.getsize(log_file) > 512 * 1024:
+            os.replace(log_file, log_file + '.old')  # evitar que el log crezca sin limite
+        with open(log_file, 'a', encoding='utf-8') as f:
+            f.write(text)
+    except Exception as e:
+        print(f"[ERROR] No se pudo escribir en ultimo_reporte_error.log: {e}")
+    return log_file
+
+
 @app.route('/api/system/report-bug', methods=['POST'])
 def report_bug():
     """Log bug report to local file and dispatch embed to Discord webhook."""
     data = request.get_json(silent=True) or {}
-    url = (data.get('url') or 'N/A').strip()
-    error_msg = (data.get('error') or 'Error no especificado').strip()
-    user_note = (data.get('note') or '').strip()
+    url = str(data.get('url') or 'N/A').strip()
+    error_msg = str(data.get('error') or 'Error no especificado').strip()
+    user_note = str(data.get('note') or '').strip()
     diagnostic = data.get('diagnostic') or {}
 
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Guardar en archivo local
-    log_file = os.path.join(ROOT_DIR, 'ultimo_reporte_error.log')
-    try:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"\n{'='*60}\n")
-            f.write(f"REPORTE DE FALLO: {timestamp_str}\n")
-            f.write(f"Versión: {APP_VERSION}\n")
-            f.write(f"URL: {url}\n")
-            f.write(f"Error: {error_msg}\n")
-            if user_note:
-                f.write(f"Nota del usuario: {user_note}\n")
-            if diagnostic:
-                f.write(f"Diagnóstico: {json.dumps(diagnostic, ensure_ascii=False, indent=2)}\n")
-            f.write(f"{'='*60}\n")
-    except Exception as e:
-        print(f"[ERROR] No se pudo escribir en ultimo_reporte_error.log: {e}")
+    entry = f"\n{'='*60}\nREPORTE DE FALLO: {timestamp_str}\nVersión: {APP_VERSION}\nURL: {url}\nError: {error_msg}\n"
+    if user_note:
+        entry += f"Nota del usuario: {user_note}\n"
+    if diagnostic:
+        entry += f"Diagnóstico: {json.dumps(diagnostic, ensure_ascii=False, indent=2)}\n"
+    entry += f"{'='*60}\n"
+    log_file = _append_local_log(entry)
 
-    # Enviar al Webhook de Discord
-    webhook_sent = False
-    webhook_error = None
-    if BUG_REPORT_WEBHOOK and not BUG_REPORT_WEBHOOK.startswith("PEGA_AQUI"):
-        try:
-            fields = [
-                {"name": "📦 Versión de la App", "value": f"`{APP_VERSION}`", "inline": True},
-                {"name": "🌐 URL Reportada", "value": f"`{url[:300]}`" if url != 'N/A' else "`N/A`", "inline": False},
-                {"name": "⚠️ Mensaje de Error", "value": f"```{error_msg[:900]}```", "inline": False},
-            ]
-            if user_note:
-                fields.append({"name": "💬 Nota del Usuario", "value": user_note[:500], "inline": False})
-            if diagnostic and isinstance(diagnostic, dict):
-                diag_summary = (
-                    f"• Tipo: {diagnostic.get('type', 'desconocido')}\n"
-                    f"• Título: {diagnostic.get('title', 'N/A')}\n"
-                    f"• Sugerencia: {diagnostic.get('suggestion', 'N/A')}"
-                )
-                fields.append({"name": "🔍 Diagnóstico Asistido", "value": diag_summary[:800], "inline": False})
+    fields = [
+        {"name": "📦 Versión de la App", "value": f"`{APP_VERSION}`", "inline": True},
+        {"name": "🌐 URL Reportada", "value": f"`{_fence(url, 300)}`" if url != 'N/A' else "`N/A`", "inline": False},
+        {"name": "⚠️ Mensaje de Error", "value": f"```{_fence(error_msg, 900)}```", "inline": False},
+    ]
+    if user_note:
+        fields.append({"name": "💬 Nota del Usuario", "value": _fence(user_note, 500), "inline": False})
+    if diagnostic and isinstance(diagnostic, dict):
+        diag_summary = (
+            f"• Tipo: {diagnostic.get('type', 'desconocido')}\n"
+            f"• Título: {diagnostic.get('title', 'N/A')}\n"
+            f"• Sugerencia: {diagnostic.get('suggestion', 'N/A')}"
+        )
+        fields.append({"name": "🔍 Diagnóstico Asistido", "value": _fence(diag_summary, 800), "inline": False})
 
-            discord_payload = {
-                "content": "🚨 **Nuevo reporte de error recibido en Descargador Universal**",
-                "embeds": [
-                    {
-                        "title": "Bug Report - Descargador Universal",
-                        "description": "Un usuario ha presionado el botón de reporte de fallos.",
-                        "color": 15158332,  # Rojo carmesí
-                        "fields": fields,
-                        "footer": {
-                            "text": f"Descargador Universal v{APP_VERSION} • {timestamp_str}"
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
-                ]
-            }
-
-            resp = requests.post(
-                BUG_REPORT_WEBHOOK,
-                json=discord_payload,
-                headers=REQUEST_HEADERS,
-                timeout=8
-            )
-            webhook_sent = (resp.status_code in (200, 204))
-            if not webhook_sent:
-                webhook_error = f"Discord HTTP {resp.status_code}: {resp.text[:200]}"
-        except Exception as e:
-            webhook_error = str(e)
+    webhook_sent, webhook_error = post_discord({
+        "content": "🚨 **Nuevo reporte de error recibido en Descargador Universal**",
+        "embeds": [{
+            "title": "Bug Report - Descargador Universal",
+            "description": "Un usuario ha presionado el botón de reporte de fallos.",
+            "color": 15158332,
+            "fields": fields,
+            "footer": {"text": f"Descargador Universal v{APP_VERSION} • {timestamp_str}"},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }],
+    })
 
     return jsonify({
         'success': True,
-        'message': 'Reporte de fallo registrado correctamente. ¡Gracias por avisar a Alex!',
+        'message': ('Reporte de fallo enviado correctamente. ¡Gracias por avisar a Alex!' if webhook_sent
+                    else 'El reporte se guardó en el archivo local, pero no se pudo enviar a Discord.'),
         'webhook_sent': webhook_sent,
         'webhook_error': webhook_error,
-        'local_log': log_file
+        'local_log': log_file,
     })
 
 
@@ -2654,133 +3291,202 @@ def report_bug():
 def send_feedback():
     """Send user suggestion, idea, comment, or question directly to Alex's Discord webhook."""
     data = request.get_json(silent=True) or {}
-    msg_type = (data.get('type') or '💡 Sugerencia').strip()
-    sender = (data.get('sender') or 'Usuario').strip() or 'Usuario'
-    message = (data.get('message') or '').strip()
-    url = (data.get('url') or 'N/A').strip() or 'N/A'
+    msg_type = str(data.get('type') or '💡 Sugerencia').strip()[:60]
+    sender = (str(data.get('sender') or 'Usuario').strip() or 'Usuario')[:60]
+    message = str(data.get('message') or '').strip()
+    url = (str(data.get('url') or 'N/A').strip() or 'N/A')
 
     if not message:
         return jsonify({'success': False, 'error': 'Por favor escribe un mensaje o sugerencia.'}), 400
 
     timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    _append_local_log(
+        f"\n{'='*60}\nFEEDBACK / MENSAJE DE USUARIO: {timestamp_str}\nTipo: {msg_type}\n"
+        f"Remitente: {sender}\nURL: {url}\nMensaje:\n{message}\n{'='*60}\n"
+    )
 
-    # Guardar en archivo local
-    log_file = os.path.join(ROOT_DIR, 'ultimo_reporte_error.log')
-    try:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            f.write(f"\n{'='*60}\n")
-            f.write(f"FEEDBACK / MENSAJE DE USUARIO: {timestamp_str}\n")
-            f.write(f"Tipo: {msg_type}\n")
-            f.write(f"Remitente: {sender}\n")
-            f.write(f"URL: {url}\n")
-            f.write(f"Mensaje:\n{message}\n")
-            f.write(f"{'='*60}\n")
-    except Exception as e:
-        print(f"[ERROR] No se pudo escribir en log: {e}")
-
-    # Discord color:
-    # Error: 15158332 (Rojo)
-    # Sugerencia / Idea: 3066993 (Cyan/Verde)
-    # Mensaje: 10181046 (Violeta)
+    # Discord color: Error rojo, Sugerencia/Idea verde, resto violeta
     color = 10181046
     if any(k in msg_type.lower() for k in ['error', 'fallo', 'bug']):
         color = 15158332
     elif any(k in msg_type.lower() for k in ['sugerencia', 'idea', 'nueva']):
         color = 3066993
 
-    webhook_sent = False
-    webhook_error = None
-    if BUG_REPORT_WEBHOOK and not BUG_REPORT_WEBHOOK.startswith("PEGA_AQUI"):
-        try:
-            fields = [
-                {"name": "🏷️ Tipo", "value": f"`{msg_type}`", "inline": True},
-                {"name": "👤 Remitente", "value": f"`{sender}`", "inline": True},
-                {"name": "📦 Versión", "value": f"`v{APP_VERSION}`", "inline": True},
-            ]
-            if url and url != 'N/A':
-                fields.append({"name": "🌐 Enlace Relacionado", "value": f"`{url[:350]}`", "inline": False})
-            fields.append({"name": "💬 Mensaje / Sugerencia", "value": message[:1024], "inline": False})
+    fields = [
+        {"name": "🏷️ Tipo", "value": f"`{_fence(msg_type, 60)}`", "inline": True},
+        {"name": "👤 Remitente", "value": f"`{_fence(sender, 60)}`", "inline": True},
+        {"name": "📦 Versión", "value": f"`v{APP_VERSION}`", "inline": True},
+    ]
+    if url != 'N/A':
+        fields.append({"name": "🌐 Enlace Relacionado", "value": f"`{_fence(url, 350)}`", "inline": False})
+    fields.append({"name": "💬 Mensaje / Sugerencia", "value": _fence(message, 1024), "inline": False})
 
-            discord_payload = {
-                "content": f"📬 **Nuevo mensaje recibido para Alex en Descargador Universal**",
-                "embeds": [
-                    {
-                        "title": f"{msg_type} - Descargador Universal",
-                        "color": color,
-                        "fields": fields,
-                        "footer": {
-                            "text": f"Descargador Universal v{APP_VERSION} • {timestamp_str}"
-                        },
-                        "timestamp": datetime.now(timezone.utc).isoformat()
-                    }
-                ]
-            }
+    webhook_sent, webhook_error = post_discord({
+        "content": "📬 **Nuevo mensaje recibido para Alex en Descargador Universal**",
+        "embeds": [{
+            "title": f"{msg_type} - Descargador Universal",
+            "color": color,
+            "fields": fields,
+            "footer": {"text": f"Descargador Universal v{APP_VERSION} • {timestamp_str}"},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }],
+    })
 
-            resp = requests.post(
-                BUG_REPORT_WEBHOOK,
-                json=discord_payload,
-                headers=REQUEST_HEADERS,
-                timeout=8
-            )
-            webhook_sent = (resp.status_code in (200, 204))
-            if not webhook_sent:
-                webhook_error = f"Discord HTTP {resp.status_code}: {resp.text[:200]}"
-        except Exception as e:
-            webhook_error = str(e)
-
+    if not webhook_sent:
+        return jsonify({'success': False, 'error': f'No se pudo enviar a Discord: {webhook_error}',
+                        'webhook_sent': False, 'webhook_error': webhook_error}), 502
     return jsonify({
         'success': True,
         'message': '¡Tu mensaje ha sido enviado exitosamente al Discord de Alex!',
-        'webhook_sent': webhook_sent,
-        'webhook_error': webhook_error,
+        'webhook_sent': True,
+        'webhook_error': None,
     })
+
+
+_server = None            # servidor HTTP en marcha (para poder pararlo limpiamente)
+_restart_requested = threading.Event()
+CURRENT_PORT = int(os.environ.get('YTDL_PORT', DEFAULT_PORT))
+
+
+def request_restart():
+    """Pide reiniciar el programa: se detiene el servidor y main() relanza el proceso."""
+    _restart_requested.set()
+    if _server is not None:
+        threading.Thread(target=_server.shutdown, daemon=True).start()
 
 
 @app.route('/api/system/restart', methods=['POST'])
 def system_restart():
-    """Restart the Python process to reload sys.modules (e.g. freshly upgraded yt-dlp) without port collisions."""
-    def do_restart():
-        import time
-        time.sleep(0.6)
-        env = os.environ.copy()
-        env["YTDLP_NO_BROWSER"] = "1"
-        try:
-            cmd = [
-                sys.executable, "-c",
-                "import time, subprocess, sys; time.sleep(1.5); subprocess.Popen(sys.argv[1:], close_fds=True)",
-                sys.executable
-            ] + sys.argv
-            subprocess.Popen(cmd, env=env, close_fds=True)
-        except Exception as e:
-            print(f"[ERROR] No se pudo reiniciar el proceso: {e}")
-        os._exit(0)
-
-    threading.Thread(target=do_restart, daemon=True).start()
-    return jsonify({'success': True, 'message': 'Reiniciando motor en segundo plano...'})
+    """Reinicia el proceso Python (recarga todo el codigo y yt-dlp) sin chocar con el puerto."""
+    threading.Timer(0.5, request_restart).start()
+    return jsonify({'success': True, 'message': 'Reiniciando motor en segundo plano...', 'boot_id': BOOT_ID})
 
 
 @app.route('/api/shutdown', methods=['POST'])
 def shutdown():
     """Shut down the Flask server gracefully without dropping the HTTP response."""
     def stop_server():
-        try:
-            os.kill(os.getpid(), signal.SIGTERM)
-        except Exception:
+        if _server is not None:
+            _server.shutdown()
+        else:
             os._exit(0)
 
-    threading.Timer(0.5, stop_server).start()
+    threading.Timer(0.5, lambda: threading.Thread(target=stop_server, daemon=True).start()).start()
     return jsonify({'success': True, 'status': 'shutting_down', 'message': 'Servidor apagándose ordenadamente...'})
 
 
 # ─── Entry Point ────────────────────────────────────────────────────────────────
 
-if __name__ == '__main__':
+def _port_is_free(port: int) -> bool:
+    """True si nadie escucha en el puerto (bind exclusivo: en Windows detecta tambien instancias antiguas)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name == 'nt' and hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        s.bind(('127.0.0.1', port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def _is_our_app(port: int) -> bool:
+    try:
+        r = requests.get(f'http://127.0.0.1:{port}/api/ping', timeout=2)
+        return r.status_code == 200 and r.json().get('app') == APP_ID
+    except Exception:
+        return False
+
+
+def _pick_port(preferred: int, restarting: bool):
+    """Devuelve el puerto a usar. Tras un reinicio espera a que el antiguo proceso suelte el suyo."""
+    # Tras un reinicio (o si el proceso anterior se esta cerrando) esperar a que suelte el puerto en vez de saltar a otro
+    deadline = time.time() + (25 if restarting else 4)
+    while time.time() < deadline:
+        if _port_is_free(preferred):
+            return preferred
+        time.sleep(0.4)
+    for port in range(preferred, preferred + 10):
+        if _port_is_free(port):
+            return port
+    return None
+
+
+def _make_server(port: int):
+    from werkzeug.serving import ThreadedWSGIServer
+
+    class ExclusiveServer(ThreadedWSGIServer):
+        allow_reuse_address = False  # en Windows SO_REUSEADDR permite que dos programas compartan el puerto
+
+        def server_bind(self):
+            if os.name == 'nt' and hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            super().server_bind()
+
+    srv = ExclusiveServer('127.0.0.1', port, app)
+    srv.daemon_threads = True
+    return srv
+
+
+def main():
+    global _server, CURRENT_PORT
     import webbrowser
-    print(f"\n  [*] YouTube Downloader")
+    restarting = os.environ.get('YTDL_RESTART') == '1'
+    preferred = int(os.environ.get('YTDL_PORT', DEFAULT_PORT))
+
+    if not restarting and not _port_is_free(preferred) and _is_our_app(preferred):
+        print(f"\n  [i] Descargador Universal ya esta abierto en http://localhost:{preferred}")
+        if os.environ.get("YTDLP_NO_BROWSER") != "1":
+            webbrowser.open(f'http://localhost:{preferred}')
+        return 0
+
+    port = _pick_port(preferred, restarting)
+    if port is None:
+        print(f"\n  [ERROR] No hay ningun puerto libre entre {preferred} y {preferred + 9}.")
+        return 1
+    CURRENT_PORT = port
+    os.environ['YTDL_PORT'] = str(port)
+
+    # Si yt-dlp cambio desde la ultima vez (p. ej. se actualizo con el programa cerrado), la cache puede estar obsoleta
+    cfg = load_config()
+    loaded = get_loaded_ytdlp_version()
+    if not same_version(cfg.get('last_ytdlp_version') or '', loaded):
+        clear_ytdlp_cache()
+        cfg['last_ytdlp_version'] = loaded
+        save_config(cfg)
+
+    _server = _make_server(port)
+    print(f"\n  [*] YouTube Downloader v{APP_VERSION}  (yt-dlp {loaded})")
     print(f"  [>] Canciones se guardaran en: {CANCIONES_DIR}")
     print(f"  [>] Videos se guardaran en:    {VIDEOS_DIR}")
-    print(f"  [>] Abriendo http://localhost:5000 ...\n")
-    # Open browser after a short delay only if not restarted via update
-    if os.environ.get("YTDLP_NO_BROWSER") != "1":
-        threading.Timer(1.5, lambda: webbrowser.open('http://localhost:5000')).start()
-    app.run(debug=False, port=5000)
+    print(f"  [>] Abriendo http://localhost:{port} ...\n")
+    if port != preferred:
+        print(f"  [i] El puerto {preferred} estaba ocupado; se usa el {port}.\n")
+    if os.environ.get("YTDLP_NO_BROWSER") != "1" and not restarting:
+        threading.Timer(1.5, lambda: webbrowser.open(f'http://localhost:{port}')).start()
+
+    threading.Thread(target=auto_update_worker, daemon=True, name='auto-update').start()
+
+    try:
+        _server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        try:
+            _server.server_close()
+        except Exception:
+            pass
+
+    if _restart_requested.is_set():
+        print("\n  [*] Reiniciando para aplicar los cambios...\n")
+        if os.environ.get('YTDL_SUPERVISED') == '1':
+            return RESTART_EXIT_CODE  # el .bat relanza el programa
+        env = {**os.environ, 'YTDL_RESTART': '1', 'YTDLP_NO_BROWSER': '1', 'YTDL_PORT': str(port)}
+        # Sin .bat que lo supervise: lanzar el proceso nuevo y esperar a que termine para que la consola siga siendo la misma
+        return subprocess.call([sys.executable] + sys.argv, env=env)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
