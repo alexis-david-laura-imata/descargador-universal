@@ -168,6 +168,62 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(A.diagnose_error('HTTP Error 429: Too Many Requests')['type'], 'YOUTUBE_RATE_LIMIT')
         self.assertEqual(A.diagnose_error('Sign in to confirm you are not a bot')['type'], 'YOUTUBE_BOT_DETECTION')
 
+    def test_impersonation_fix_only_when_curl_cffi_missing(self):
+        err = 'ERROR: [TikTok] 123: Unexpected response from webpage request'
+        with mock.patch.object(A, 'has_impersonation', return_value=False):
+            self.assertTrue(A.needs_impersonation_fix(err, 'https://www.tiktok.com/@a/video/1'))
+            self.assertTrue(A.needs_impersonation_fix('algo fallo', 'https://vm.tiktok.com/abc'))
+            self.assertTrue(A.needs_impersonation_fix('The extractor is attempting impersonation', 'https://x.com/a'))
+            self.assertFalse(A.needs_impersonation_fix('Video unavailable. This video is private', 'https://youtu.be/x'))
+        with mock.patch.object(A, 'has_impersonation', return_value=True):
+            self.assertFalse(A.needs_impersonation_fix(err, 'https://www.tiktok.com/@a/video/1'))
+
+    def test_ensure_impersonation_installs_once_and_reloads(self):
+        logs = []
+        with mock.patch.object(A, '_impersonate_tried', False), \
+                mock.patch.object(A, 'has_impersonation', side_effect=[False, True]), \
+                mock.patch.object(A, 'update_ytdlp_in_env', return_value=True) as pip, \
+                mock.patch.object(A, 'reload_ytdlp', return_value=True) as reload:
+            self.assertTrue(A.ensure_impersonation(log=logs.append, force_reload=True))
+            pip.assert_called_once()
+            reload.assert_called_once_with(force=True)
+            self.assertFalse(A.ensure_impersonation(log=logs.append))  # segunda vez: no reintenta
+            pip.assert_called_once()
+
+    def test_ensure_impersonation_pip_failure_is_safe(self):
+        with mock.patch.object(A, '_impersonate_tried', False), \
+                mock.patch.object(A, 'has_impersonation', return_value=False), \
+                mock.patch.object(A, 'update_ytdlp_in_env', return_value=False), \
+                mock.patch.object(A, 'reload_ytdlp') as reload:
+            self.assertFalse(A.ensure_impersonation(log=lambda m: None))
+            reload.assert_not_called()
+
+    def test_ydl_extract_retries_after_impersonation_install(self):
+        calls = []
+
+        class FakeYDL:
+            def __init__(self, opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def extract_info(self, url, download=False):
+                calls.append(url)
+                if len(calls) == 1:
+                    raise RuntimeError('Unexpected response from webpage request')
+                return {'title': 'ok'}
+
+        with mock.patch.object(A, 'YoutubeDL', FakeYDL), \
+                mock.patch.object(A, 'has_impersonation', return_value=False), \
+                mock.patch.object(A, 'ensure_impersonation', return_value=True) as ensure:
+            self.assertEqual(A.ydl_extract({}, 'https://www.tiktok.com/@a/video/1')['title'], 'ok')
+            ensure.assert_called_once()
+        self.assertEqual(len(calls), 2)
+
     def test_sha_variants_accept_crlf_checkouts(self):
         import hashlib
         lf = b'a\nb\n'

@@ -1,4 +1,4 @@
 flask
-yt-dlp[default]
+yt-dlp[default,curl-cffi]
 mutagen
 requests

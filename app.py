@@ -219,7 +219,7 @@ def ping():
 
 
 # App Version, OTA Remote Updates & Bug Reporting
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.1.1"
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/alexis-david-laura-imata/descargador-universal/main"
 if os.environ.get("YTDL_OTA_BASE", "").startswith(("http://127.0.0.1", "http://localhost")):
     GITHUB_RAW_BASE = os.environ["YTDL_OTA_BASE"]  # solo para pruebas locales
@@ -1231,11 +1231,58 @@ def _run_pip(python_exe: str, packages: list, log, timeout: int = 900) -> bool:
 
 
 def update_ytdlp_in_env(python_exe: str, log) -> bool:
-    """Instala/actualiza yt-dlp con sus extras (yt-dlp-ejs, brotli, certifi...). Si los extras fallan, instala solo yt-dlp."""
+    """Instala/actualiza yt-dlp con sus extras (yt-dlp-ejs, brotli, certifi... y curl-cffi, que permite "hacerse pasar"
+    por un navegador real: TikTok bloquea a los clientes Python normales). Si algun extra falla, instala con menos extras."""
+    if _run_pip(python_exe, ['yt-dlp[default,curl-cffi]'], log):
+        return True
+    log("  [AVISO] Fallo la instalacion con curl-cffi; reintentando sin el...")
     if _run_pip(python_exe, ['yt-dlp[default]'], log):
         return True
     log("  [AVISO] Fallo la instalacion con extras; reintentando solo con yt-dlp...")
     return _run_pip(python_exe, ['yt-dlp'], log)
+
+
+# ── Suplantacion de navegador (curl_cffi) ───────────────────────────────────────
+# TikTok responde con una pagina falsa de "Site Maintenance" a los clientes cuya huella TLS no es la de un navegador
+# (pasa con el Python 3.12 / OpenSSL 3.0 de la version portable). yt-dlp lo resuelve imitando a Chrome, pero solo si
+# curl_cffi esta instalado. Las copias que se actualizan por OTA solo reciben app.py, asi que la app lo instala sola.
+_impersonate_lock = threading.Lock()
+_impersonate_tried = False
+_IMPERSONATE_HOSTS = ('tiktok.com', 'instagram.com')
+_IMPERSONATE_PATTERNS = ('impersonat', 'unexpected response', 'unable to download webpage', 'http error 403',
+                         'unable to extract')
+
+
+def has_impersonation() -> bool:
+    return importlib.util.find_spec('curl_cffi') is not None
+
+
+def needs_impersonation_fix(message: str, url: str = '') -> bool:
+    """True si el fallo huele a que el sitio nos tomo por un bot y curl_cffi aun no esta instalado."""
+    if has_impersonation():
+        return False
+    low = (message or '').lower()
+    return any(h in (url or '').lower() for h in _IMPERSONATE_HOSTS) or any(p in low for p in _IMPERSONATE_PATTERNS)
+
+
+def ensure_impersonation(log=print, force_reload: bool = False) -> bool:
+    """Instala curl_cffi (como maximo una vez por ejecucion) y recarga yt-dlp para que lo use.
+    Devuelve True si quedo instalado y cargado, es decir, si merece reintentar la descarga."""
+    global _impersonate_tried
+    with _impersonate_lock:
+        if _impersonate_tried:
+            return False
+        _impersonate_tried = True
+        try:
+            if not has_impersonation():
+                log("[*] Instalando curl-cffi (permite descargar de TikTok/Instagram imitando a un navegador)...")
+                if not update_ytdlp_in_env(sys.executable, lambda m: log(m)):
+                    return False
+            reload_ytdlp(force=force_reload)
+            return has_impersonation()
+        except Exception as e:
+            log(f"[AVISO] No se pudo activar curl-cffi: {e}")
+            return False
 
 
 # ── Deno (resuelve los retos JavaScript de YouTube) ─────────────────────────────
@@ -1608,6 +1655,9 @@ def run_auto_update_cycle() -> str:
                 reload_ytdlp()
                 summary.append('extras de yt-dlp instalados')
 
+        if not has_impersonation() and ensure_impersonation(log):
+            summary.append('curl-cffi instalado (TikTok/Instagram)')
+
         manifest = info.get('ota')
         if manifest and manifest.get('version') and is_newer_version(manifest['version'], get_app_version()):
             log(f"App {get_app_version()} -> {manifest['version']}")
@@ -1651,6 +1701,9 @@ def ydl_extract(ydl_opts: dict, url: str, download: bool = False):
             if 'cookiesfrombrowser' in opts:
                 opts.pop('cookiesfrombrowser', None)
                 continue
+            if needs_impersonation_fix(str(e), url) and ensure_impersonation(
+                    log=lambda m: print(f"[curl-cffi] {m}"), force_reload=True):
+                continue
             if not healed and looks_like_ytdlp_breakage(str(e)) and auto_heal(str(e)):
                 healed = True
                 continue
@@ -1673,6 +1726,11 @@ def ydl_download(ydl_opts: dict, url: str, notify=None):
                     notify('[Aviso] Reintentando descarga sin cookies del navegador...')
                 opts.pop('cookiesfrombrowser', None)
                 continue
+            if needs_impersonation_fix(str(e), url):
+                if notify:
+                    notify('[Aviso] El sitio bloqueo la descarga: instalando componente de compatibilidad (curl-cffi)...')
+                if ensure_impersonation(log=lambda m: print(f"[curl-cffi] {m}"), force_reload=True):
+                    continue
             if not healed and looks_like_ytdlp_breakage(str(e)) and auto_heal(str(e)):
                 if notify:
                     notify('[Aviso] YouTube cambio algo: se limpio la cache / actualizo yt-dlp. Reintentando...')
