@@ -388,10 +388,17 @@
                         <div class="option-group">
                             <label for="downloadTypeSelect">Tipo de Descarga</label>
                             <select id="downloadTypeSelect" class="select-styled">
-                                <option value="video_audio">Video + Audio (MP4)</option>
+                                <option value="video_audio">Video + Audio</option>
                                 <option value="video_only">Solo Video (sin audio)</option>
-                                <option value="audio_only">Solo Audio (MP3 a 192 kbps)</option>
+                                <option value="audio_only">Solo Audio</option>
                             </select>
+                        </div>
+                        <div class="option-group">
+                            <label for="outputFormatSelect">
+                                Formato del archivo
+                                <span class="badge-mini">Universal</span>
+                            </label>
+                            <select id="outputFormatSelect" class="select-styled"></select>
                         </div>
                         <div class="option-group hidden" id="audioLanguageGroup">
                             <label for="audioLanguageSelect">
@@ -1371,6 +1378,7 @@
             qualitySelect:    document.getElementById('qualitySelect'),
             typeSelect:       document.getElementById('downloadTypeSelect'),
             typeHint:         document.getElementById('downloadTypeHint'),
+            formatSelect:     document.getElementById('outputFormatSelect'),
             audioGroup:       document.getElementById('audioLanguageGroup'),
             audioSelect:      document.getElementById('audioLanguageSelect'),
             subCountBadge:    document.getElementById('subCountBadge'),
@@ -1465,7 +1473,7 @@
 
             if (type === 'audio_only') {
                 displaySize = videoData.audio_filesize_mb || '~5.0 MB';
-                hint = '(Audio MP3 • 192 kbps)';
+                hint = `(Audio ${(v.formatSelect?.value || 'mp3').toUpperCase()})`;
             } else if (type === 'video_only') {
                 displaySize = qualObj?.video_filesize_mb || qualObj?.filesize_mb || '~80 MB';
                 hint = `(${selectedOpt?.textContent?.split('—')[0]?.trim() || height + 'p'} • Solo Video)`;
@@ -1795,29 +1803,86 @@
             }
         });
 
+        // ── Output Format (universal formats) ──────────────────────────────────
+        const OUTPUT_FORMATS = {
+            video: [
+                {value: 'mp4_universal', label: 'MP4 universal — iPhone, Android, TV (H.264/AAC)',
+                 hint: 'Se reproduce en iPhone/iPad/Mac, Android, Smart TV, WhatsApp y editores. Los subtítulos se incrustan como pistas que puedes activar o cambiar al reproducir. Si eliges más de 1080p, YouTube no da H.264 y el video se convierte (tarda más).'},
+                {value: 'mov', label: 'MOV — Apple (QuickTime / Fotos)',
+                 hint: 'Igual de compatible que el MP4 universal, en contenedor nativo de Apple.'},
+                {value: 'mp4', label: 'MP4 máxima calidad (AV1/VP9) — PC',
+                 hint: '⚠️ Puede venir en AV1/VP9 + Opus: se ve en PC (VLC, navegador) pero NO en iPhone ni en muchas TVs.'},
+                {value: 'mkv', label: 'MKV — VLC / PC',
+                 hint: 'Contenedor flexible para VLC o reproductores de PC. No se reproduce en iPhone sin apps externas.'},
+            ],
+            audio: [
+                {value: 'mp3', label: 'MP3 (192 kbps) — universal', hint: 'Funciona en cualquier dispositivo y reproductor.'},
+                {value: 'm4a', label: 'M4A / AAC — iPhone, Apple Music', hint: 'Formato nativo de Apple, buena calidad y tamaño pequeño.'},
+                {value: 'wav', label: 'WAV — sin compresión', hint: 'Archivo muy pesado; útil para edición de audio.'},
+                {value: 'flac', label: 'FLAC — sin pérdida', hint: 'Sin pérdida y más ligero que WAV. iPhone lo reproduce en la app Archivos.'},
+                {value: 'opus', label: 'OPUS — más ligero', hint: 'Muy eficiente, pero poco compatible con iPhone y equipos antiguos.'},
+                {value: 'ogg', label: 'OGG (Vorbis)', hint: 'Formato libre; compatible con Android y PC, no con iPhone.'},
+            ],
+        };
+        const lastFormat = {video: 'mp4_universal', audio: 'mp3'};
+
+        function currentFormatInfo() {
+            const kind = v.typeSelect.value === 'audio_only' ? 'audio' : 'video';
+            return OUTPUT_FORMATS[kind].find(f => f.value === v.formatSelect.value) || OUTPUT_FORMATS[kind][0];
+        }
+
+        function renderOutputFormats() {
+            if (!v.formatSelect) return;
+            const kind = v.typeSelect.value === 'audio_only' ? 'audio' : 'video';
+            v.formatSelect.innerHTML = '';
+            OUTPUT_FORMATS[kind].forEach(f => {
+                const opt = document.createElement('option');
+                opt.value = f.value;
+                opt.textContent = f.label;
+                v.formatSelect.appendChild(opt);
+            });
+            v.formatSelect.value = lastFormat[kind];
+            v.formatSelect.dataset.kind = kind;
+        }
+
+        function updateTypeHint() {
+            const type = v.typeSelect.value;
+            const parts = [];
+            if (type === 'video_only') parts.push('El archivo no contendrá audio.');
+            if (v.formatSelect) parts.push(currentFormatInfo().hint);
+            v.typeHint.textContent = parts.join(' ');
+            v.typeHint.classList.toggle('hidden', parts.length === 0);
+        }
+
+        if (v.formatSelect) {
+            renderOutputFormats();
+            updateTypeHint();
+            v.formatSelect.addEventListener('change', () => {
+                lastFormat[v.formatSelect.dataset.kind] = v.formatSelect.value;
+                updateTypeHint();
+                updateSelectedFilesizeDisplay();
+            });
+        }
+
         // ── Download Type Change ───────────────────────────────────────────────
         v.typeSelect.addEventListener('change', () => {
             const type = v.typeSelect.value;
             const qualityRow = v.qualitySelect.closest('.option-group');
 
+            if (v.formatSelect && v.formatSelect.dataset.kind !== (type === 'audio_only' ? 'audio' : 'video')) {
+                renderOutputFormats();
+            }
+
             if (type === 'audio_only') {
                 qualityRow.style.opacity = '0.4';
                 qualityRow.style.pointerEvents = 'none';
-                v.typeHint.textContent = 'Se descargara el audio en formato MP3 a 192 kbps.';
-                v.typeHint.classList.remove('hidden');
                 v.downloadBtnText.textContent = 'Descargar Audio';
-            } else if (type === 'video_only') {
-                qualityRow.style.opacity = '1';
-                qualityRow.style.pointerEvents = 'auto';
-                v.typeHint.textContent = 'El archivo no contendra audio.';
-                v.typeHint.classList.remove('hidden');
-                v.downloadBtnText.textContent = 'Descargar Video';
             } else {
                 qualityRow.style.opacity = '1';
                 qualityRow.style.pointerEvents = 'auto';
-                v.typeHint.classList.add('hidden');
                 v.downloadBtnText.textContent = 'Descargar Video';
             }
+            updateTypeHint();
 
             const activeLabel = document.getElementById('activeVideoFolderLabel');
             if (activeLabel) {
@@ -2115,7 +2180,9 @@
             dlModal.thumb.src = videoData.thumbnail_url || '';
             dlModal.title.textContent = videoData.title || '';
             dlModal.qualityTag.textContent = v.qualitySelect.options[v.qualitySelect.selectedIndex]?.textContent || '1080p';
-            dlModal.typeTag.textContent = v.typeSelect.options[v.typeSelect.selectedIndex]?.textContent || 'Video + Audio';
+            const typeLabel = v.typeSelect.options[v.typeSelect.selectedIndex]?.textContent || 'Video + Audio';
+            const fmtLabel = v.formatSelect ? (v.formatSelect.options[v.formatSelect.selectedIndex]?.textContent || '').split('—')[0].trim() : '';
+            dlModal.typeTag.textContent = fmtLabel ? `${typeLabel} • ${fmtLabel}` : typeLabel;
 
             // Video feature tags in modal
             if (v.editorModeCheckbox && v.editorModeCheckbox.checked) {
@@ -2240,6 +2307,7 @@
                         start_time,
                         end_time,
                         cookies_from_browser,
+                        output_format: v.formatSelect ? v.formatSelect.value : null,
                     }),
                 });
                 const data = await res.json();

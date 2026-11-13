@@ -219,7 +219,7 @@ def ping():
 
 
 # App Version, OTA Remote Updates & Bug Reporting
-APP_VERSION = "2.1.1"
+APP_VERSION = "2.2.0"
 GITHUB_RAW_BASE = "https://raw.githubusercontent.com/alexis-david-laura-imata/descargador-universal/main"
 if os.environ.get("YTDL_OTA_BASE", "").startswith(("http://127.0.0.1", "http://localhost")):
     GITHUB_RAW_BASE = os.environ["YTDL_OTA_BASE"]  # solo para pruebas locales
@@ -687,6 +687,7 @@ class DownloadQueueManager:
                     sponsorblock=opts.get('sponsorblock', False),
                     split_chapters=opts.get('split_chapters', False),
                     cookies_from_browser=opts.get('cookies_from_browser'),
+                    output_format=opts.get('output_format'),
                 )
         except DownloadCancelled:
             with self.lock:
@@ -2122,14 +2123,174 @@ def extract_video_info(url: str, cookies_from_browser: str = None) -> dict:
     }
 
 
+# ── Formatos de salida universales ───────────────────────────────────────────
+# Video: 'universal' = H.264 + AAC (+ subtitulos mov_text), lo unico que reproducen
+# sin problemas iPhone/iPad/Mac (Fotos, Archivos, QuickTime), Android, TVs y WhatsApp.
+VIDEO_OUTPUT_FORMATS = {
+    'mp4_universal': {'ext': 'mp4', 'universal': True},
+    'mov':           {'ext': 'mov', 'universal': True},
+    'mp4':           {'ext': 'mp4', 'universal': False},   # maxima calidad (AV1/VP9/Opus posibles)
+    'mkv':           {'ext': 'mkv', 'universal': False},
+}
+# Audio: clave -> (codec para FFmpegExtractAudio, extension final, calidad o None)
+AUDIO_OUTPUT_FORMATS = {
+    'mp3':  ('mp3', 'mp3', '192'),
+    'm4a':  ('m4a', 'm4a', '192'),
+    'wav':  ('wav', 'wav', None),
+    'flac': ('flac', 'flac', None),
+    'opus': ('opus', 'opus', None),
+    'ogg':  ('vorbis', 'ogg', None),
+}
+DEFAULT_VIDEO_FORMAT = 'mp4_universal'
+DEFAULT_AUDIO_FORMAT = 'mp3'
+APPLE_VIDEO_CODECS = {'h264', 'hevc'}
+APPLE_AUDIO_CODECS = {'aac', 'mp3', 'alac', 'ac3', 'eac3'}
+VIDEO_FILE_EXTS = ('.mp4', '.mov', '.mkv', '.webm', '.m4v')
+
+
+def resolve_output_format(download_type, output_format):
+    """Devuelve una clave valida de formato segun el tipo de descarga."""
+    if download_type == 'audio_only':
+        return output_format if output_format in AUDIO_OUTPUT_FORMATS else DEFAULT_AUDIO_FORMAT
+    return output_format if output_format in VIDEO_OUTPUT_FORMATS else DEFAULT_VIDEO_FORMAT
+
+
+def probe_media(path):
+    """ffprobe -> (streams, duracion_en_segundos)."""
+    res = subprocess.run(
+        ['ffprobe', '-v', 'error', '-show_entries',
+         'stream=index,codec_type,codec_name:stream_disposition=attached_pic:format=duration',
+         '-of', 'json', path],
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=120, creationflags=NO_WINDOW)
+    data = json.loads(res.stdout or '{}')
+    try:
+        duration = float((data.get('format') or {}).get('duration') or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    return data.get('streams') or [], duration
+
+
+def plan_universal_conversion(streams, current_ext, target_ext):
+    """Decide que hay que recodificar para que el archivo sea reproducible en iPhone.
+    Devuelve None si ya es compatible, o un dict con lo que hay que convertir."""
+    video = [s for s in streams if s.get('codec_type') == 'video'
+             and not (s.get('disposition') or {}).get('attached_pic')]
+    audio = [s for s in streams if s.get('codec_type') == 'audio']
+    subs = [s for s in streams if s.get('codec_type') == 'subtitle']
+    plan = {
+        'video': any(s.get('codec_name') not in APPLE_VIDEO_CODECS for s in video),
+        'audio': any(s.get('codec_name') not in APPLE_AUDIO_CODECS for s in audio),
+        'subs': any(s.get('codec_name') != 'mov_text' for s in subs),
+        'hevc': any(s.get('codec_name') == 'hevc' for s in video),
+    }
+    if not (plan['video'] or plan['audio'] or plan['subs']) and current_ext == target_ext:
+        return None
+    return plan
+
+
+def make_universal(path, target_ext, notify=None, on_progress=None, should_cancel=None):
+    """Convierte (solo lo necesario) a H.264 + AAC + subtitulos mov_text en MP4/MOV.
+    Devuelve la ruta final del archivo compatible."""
+    streams, duration = probe_media(path)
+    current_ext = os.path.splitext(path)[1].lower().lstrip('.')
+    plan = plan_universal_conversion(streams, current_ext, target_ext)
+    final_path = os.path.splitext(path)[0] + '.' + target_ext
+    if plan is None:
+        return path
+
+    codecs = ', '.join(sorted({s.get('codec_name', '?') for s in streams
+                               if s.get('codec_type') in ('video', 'audio')}))
+    if notify:
+        if plan['video']:
+            notify(f'[Compatibilidad] Codecs {codecs} no se reproducen en iPhone: convirtiendo a H.264/AAC (puede tardar)...')
+        else:
+            notify(f'[Compatibilidad] Ajustando audio/subtitulos ({codecs}) para iPhone sin recodificar la imagen...')
+
+    tmp_path = os.path.splitext(path)[0] + '.convirtiendo.' + target_ext
+    cmd = ['ffmpeg', '-y', '-hide_banner', '-loglevel', 'error', '-nostats',
+           '-progress', 'pipe:1', '-i', path,
+           '-map', '0:V?', '-map', '0:a?', '-map', '0:s?', '-map_metadata', '0']
+    if plan['video']:
+        cmd += ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20',
+                '-pix_fmt', 'yuv420p', '-profile:v', 'high']
+    else:
+        cmd += ['-c:v', 'copy'] + (['-tag:v', 'hvc1'] if plan['hevc'] else [])
+    cmd += ['-c:a', 'aac', '-b:a', '192k'] if plan['audio'] else ['-c:a', 'copy']
+    cmd += ['-c:s', 'mov_text', '-movflags', '+faststart', tmp_path]
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, encoding='utf-8', errors='replace',
+                            creationflags=NO_WINDOW)
+    # stderr en hilo aparte para que no se llene el buffer y bloquee ffmpeg
+    err_lines = []
+    err_thread = threading.Thread(target=lambda: err_lines.extend(proc.stderr), daemon=True)
+    err_thread.start()
+    last_pct = -1
+    try:
+        for line in proc.stdout:
+            if should_cancel and should_cancel():
+                proc.kill()
+                raise DownloadCancelled('Descarga cancelada por el usuario')
+            key, _, val = line.strip().partition('=')
+            if key == 'out_time_us' and duration > 0 and on_progress:
+                try:
+                    pct = int(min(99, max(0, int(val) / 1e6 / duration * 100)))
+                except ValueError:
+                    continue
+                if pct != last_pct:
+                    last_pct = pct
+                    on_progress(pct)
+        proc.wait()
+        err_thread.join(timeout=5)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+    finally:
+        for pipe in (proc.stdout, proc.stderr):
+            try:
+                pipe.close()
+            except Exception:
+                pass
+
+    if proc.returncode != 0 or not os.path.isfile(tmp_path):
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise RuntimeError('ffmpeg no pudo convertir el video: ' + ''.join(err_lines[-5:]).strip())
+
+    os.replace(tmp_path, final_path)
+    if os.path.abspath(final_path) != os.path.abspath(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    return final_path
+
+
 def _do_video_download(url, height, download_type, title, task_id,
                        audio_lang=None, embed_subs=False, sub_langs=None,
                        write_auto_sub=False, write_manual_sub=False,
                        start_time=None, end_time=None, editor_mode=False,
                        sponsorblock=False, split_chapters=False,
-                       cookies_from_browser=None):
+                       cookies_from_browser=None, output_format=None):
     """Background thread: download video/audio with progress via queue."""
     q = download_tasks[task_id]
+    output_format = resolve_output_format(download_type, output_format)
+    if download_type == 'audio_only':
+        audio_codec, out_ext, audio_quality = AUDIO_OUTPUT_FORMATS[output_format]
+        make_compatible = False
+    else:
+        out_ext = VIDEO_OUTPUT_FORMATS[output_format]['ext']
+        # El modo editores tambien exige H.264/AAC real (no solo preferirlo)
+        make_compatible = VIDEO_OUTPUT_FORMATS[output_format]['universal'] or (
+            editor_mode and out_ext in ('mp4', 'mov'))
 
     try:
         clean_url = normalize_media_url(url)
@@ -2257,6 +2418,10 @@ def _do_video_download(url, height, download_type, title, task_id,
         # ── Editor Compatible Mode (Force H.264 / AAC) ──────────────────────────
         if editor_mode and download_type != 'audio_only':
             ydl_opts['format_sort'] = ['proto:https', 'vcodec:h264', 'res', 'acodec:m4a']
+        elif make_compatible:
+            # Respeta la resolucion elegida y, a igual resolucion, prefiere H.264/AAC
+            # para no tener que recodificar (YouTube solo ofrece H.264 hasta 1080p)
+            ydl_opts['format_sort'] = ['res', 'vcodec:h264', 'acodec:aac', 'proto:https', 'fps']
 
         # ── Clip Trimmer ────────────────────────────────────────────────────────
         if is_clip:
@@ -2273,13 +2438,17 @@ def _do_video_download(url, height, download_type, title, task_id,
             ])
 
         if download_type == 'audio_only':
-            ydl_opts['postprocessors'].append({
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            })
+            extract_pp = {'key': 'FFmpegExtractAudio', 'preferredcodec': audio_codec}
+            if audio_quality:
+                extract_pp['preferredquality'] = audio_quality
+            ydl_opts['postprocessors'].append(extract_pp)
         else:
-            ydl_opts['merge_output_format'] = 'mp4'
+            # MOV no admite todos los codecs de YouTube (Opus/VP9): se une en MKV y
+            # make_universal() lo deja luego en MOV con H.264/AAC
+            ydl_opts['merge_output_format'] = 'mkv' if out_ext == 'mov' else out_ext
+            if download_type == 'video_only' and not make_compatible:
+                # Sin merge, yt-dlp dejaria el contenedor original (a menudo .webm)
+                ydl_opts['postprocessors'].append({'key': 'FFmpegVideoRemuxer', 'preferedformat': out_ext})
             if embed_subs and sub_langs:
                 ydl_opts['writesubtitles'] = bool(write_manual_sub)
                 ydl_opts['writeautomaticsub'] = bool(write_auto_sub)
@@ -2354,21 +2523,43 @@ def _do_video_download(url, height, download_type, title, task_id,
                 q.put({'status': 'log', 'message': f'[Aviso] No se pudo guardar miniatura automática: {te}'})
 
         # ── Find output file or chapter directory ───────────────────────────────
+        def _universal(path, label=''):
+            """Pasa un archivo a H.264/AAC/mov_text mostrando el avance de la conversion."""
+            def on_progress(pct):
+                msg = f'Convirtiendo para iPhone / compatibilidad universal{label}... {pct}%'
+                if task_id:
+                    queue_mgr.update_task_progress(task_id, pct, '', '', '', '')
+                q.put({'status': 'processing', 'message': msg})
+            try:
+                return make_universal(
+                    path, out_ext, notify=notify, on_progress=on_progress,
+                    should_cancel=lambda: bool(task_id and task_id in queue_mgr.cancel_flags))
+            except DownloadCancelled:
+                raise
+            except Exception as conv_err:
+                notify(f'[Aviso] No se pudo convertir a formato compatible: {conv_err}. Se conserva el archivo original.')
+                return path
+
         if is_split:
             final_path = chapter_dir
             final_filename = f"{safe_title} (Capítulos divididos)"
+            if make_compatible:
+                parts = sorted(f for f in os.listdir(chapter_dir) if f.lower().endswith(VIDEO_FILE_EXTS))
+                for i, f in enumerate(parts, 1):
+                    _universal(os.path.join(chapter_dir, f), f' ({i}/{len(parts)})')
         else:
-            expected_ext = '.mp3' if download_type == 'audio_only' else '.mp4'
-            final_path = os.path.join(target_dir, f'{safe_title}{expected_ext}')
+            final_path = os.path.join(target_dir, f'{safe_title}.{out_ext}')
 
             if not os.path.exists(final_path):
                 for f in os.listdir(target_dir):
                     if f.startswith(safe_title) and not f.endswith(('.part', '.ytdl', '.srt', '.vtt', '.json3', '.ttml')):
                         final_path = os.path.join(target_dir, f)
                         break
-            final_filename = os.path.basename(final_path)
             if not os.path.isfile(final_path):
                 raise RuntimeError('La descarga termino pero no se encontro el archivo resultante.')
+            if make_compatible:
+                final_path = _universal(final_path)
+            final_filename = os.path.basename(final_path)
 
         fsize = format_bytes(os.path.getsize(final_path)) if (os.path.exists(final_path) and not is_split) else ''
         if task_id:
@@ -2538,6 +2729,7 @@ def video_download():
     sponsorblock = bool(data.get('sponsorblock', False))
     split_chapters = bool(data.get('split_chapters', False))
     cookies_from_browser = data.get('cookies_from_browser')
+    output_format = resolve_output_format(download_type, data.get('output_format'))
 
     if not url:
         return jsonify({'success': False, 'error': 'No se proporciono un enlace.'}), 400
@@ -2561,6 +2753,7 @@ def video_download():
             'sponsorblock': sponsorblock,
             'split_chapters': split_chapters,
             'cookies_from_browser': cookies_from_browser,
+            'output_format': output_format,
         }
     )
 

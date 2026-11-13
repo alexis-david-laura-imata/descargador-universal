@@ -1,9 +1,9 @@
 {
-  "version": "2.1.1",
-  "changelog": "Actualización 2.1.1: arreglada la descarga de TikTok (y Instagram). TikTok bloqueaba a la versión portable con una página falsa de mantenimiento; ahora la app imita a un navegador real (curl-cffi) y lo instala sola si falta, sin que tengas que hacer nada.",
+  "version": "2.2.0",
+  "changelog": "Actualización 2.2.0: nuevo selector de formato. Los videos se descargan por defecto en MP4 universal (H.264/AAC) que se reproduce en iPhone, Android y TVs, con subtítulos que puedes activar o cambiar al reproducir. También puedes elegir MOV, MKV o MP4 máxima calidad, y para audio MP3, M4A, WAV, FLAC, OPUS u OGG.",
   "files": {
-    "app.py": "22fe136204937220840dec7af150225bd9093a31bd06f94c3937eca6f2ef8b7a",
-    "templates/index.html": "31c33d4eb7a237eb48050a8bc116cb1aa76ad6aec3bf8fbcafc91cc4514b8a57",
+    "app.py": "8f88c2f4b2d02848bfe065d8962969b3d150ed0a44382f24c96ee2cf4c9df84b",
+    "templates/index.html": "00e7c0c5508271a6dea93121510331762b5aa9b6ef6c3a11f267e73fe2f45abc",
     "static/style.css": "fc3e5df966c37209272c246187ef299b6c1985db70ae5fdf9a510641fb619b9d"
   }
 }

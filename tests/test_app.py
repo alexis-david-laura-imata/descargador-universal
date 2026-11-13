@@ -385,5 +385,60 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(mgr.get_task(tid)['status'], 'failed')
 
 
+class OutputFormatTests(unittest.TestCase):
+    def test_resolve_output_format_defaults(self):
+        self.assertEqual(A.resolve_output_format('video_audio', None), 'mp4_universal')
+        self.assertEqual(A.resolve_output_format('video_audio', 'mkv'), 'mkv')
+        self.assertEqual(A.resolve_output_format('video_audio', 'mp3'), 'mp4_universal')
+        self.assertEqual(A.resolve_output_format('audio_only', None), 'mp3')
+        self.assertEqual(A.resolve_output_format('audio_only', 'flac'), 'flac')
+        self.assertEqual(A.resolve_output_format('audio_only', '../evil'), 'mp3')
+
+    def test_plan_detects_iphone_incompatible_codecs(self):
+        av1_opus = [
+            {'codec_type': 'video', 'codec_name': 'av1'},
+            {'codec_type': 'audio', 'codec_name': 'opus'},
+            {'codec_type': 'subtitle', 'codec_name': 'mov_text'},
+        ]
+        plan = A.plan_universal_conversion(av1_opus, 'mp4', 'mp4')
+        self.assertTrue(plan['video'])
+        self.assertTrue(plan['audio'])
+        self.assertFalse(plan['subs'])
+
+    def test_plan_skips_already_compatible(self):
+        ok = [
+            {'codec_type': 'video', 'codec_name': 'h264'},
+            {'codec_type': 'video', 'codec_name': 'mjpeg', 'disposition': {'attached_pic': 1}},
+            {'codec_type': 'audio', 'codec_name': 'aac'},
+            {'codec_type': 'subtitle', 'codec_name': 'mov_text'},
+        ]
+        self.assertIsNone(A.plan_universal_conversion(ok, 'mp4', 'mp4'))
+        # Mismo contenido pero en MKV -> hay que remuxar a MP4
+        self.assertIsNotNone(A.plan_universal_conversion(ok, 'mkv', 'mp4'))
+
+    @unittest.skipUnless(A.shutil.which('ffmpeg') and A.shutil.which('ffprobe'), 'ffmpeg no disponible')
+    def test_make_universal_real_conversion(self):
+        with tempfile.TemporaryDirectory() as d:
+            srt = os.path.join(d, 's.srt')
+            with open(srt, 'w', encoding='utf-8') as f:
+                f.write('1\n00:00:00,000 --> 00:00:01,500\nHola\n')
+            src = os.path.join(d, 'video.mkv')
+            A.subprocess.run(
+                ['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=15:duration=2',
+                 '-f', 'lavfi', '-i', 'sine=duration=2', '-i', srt,
+                 '-map', '0', '-map', '1', '-map', '2', '-c:v', 'mpeg4', '-c:a', 'flac', '-c:s', 'srt',
+                 '-metadata:s:s:0', 'language=spa', src],
+                check=True, capture_output=True)
+            progress = []
+            out = A.make_universal(src, 'mp4', on_progress=progress.append)
+            self.assertTrue(out.endswith('video.mp4'))
+            self.assertFalse(os.path.exists(src))
+            streams, _ = A.probe_media(out)
+            codecs = {s['codec_type']: s['codec_name'] for s in streams}
+            self.assertEqual(codecs, {'video': 'h264', 'audio': 'aac', 'subtitle': 'mov_text'})
+            # Segunda pasada: ya es compatible, no se toca
+            self.assertEqual(A.make_universal(out, 'mp4'), out)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
